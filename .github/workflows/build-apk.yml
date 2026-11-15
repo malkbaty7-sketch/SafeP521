@@ -59,13 +59,12 @@ jobs:
       - name: Prepare Secrets & Keystores
         run: |
           echo "Preparing environment and keystores..."
-          # Prepare .env for Secrets Gradle Plugin
+          # Prepare .env.example and .env for Secrets Gradle Plugin
+          if [ ! -f ".env.example" ]; then
+            echo "# Default environment configuration" > .env.example
+          fi
           if [ ! -f ".env" ]; then
-            if [ -f ".env.example" ]; then
-              cp .env.example .env
-            else
-              touch .env
-            fi
+            cp .env.example .env
           fi
 
           # Restore debug.keystore from base64 if present, or generate one
