@@ -56,10 +56,13 @@ jobs:
           gradle_status=${PIPESTATUS[0]}
           if [[ "$gradle_status" -ne 0 ]]; then
             mapfile -t diagnostic_lines < <(
-              grep -E '^(e: |w: |error:|FAILURE:|.*What went wrong:|Execution failed for task|> Task .*FAILED|> |Caused by:|BUILD FAILED|[0-9]+ tests? (completed|failed))' "$log_file" | tail -n 50
+              {
+                grep -Ei '^(e: |error:|.*(unresolved reference|type mismatch|no value passed|cannot find|could not resolve|could not find|lint found|failing tests?|expected:|actual:))' "$log_file" | head -n 5 || true
+                grep -Ei '^(FAILURE:|.*What went wrong:|Execution failed for task|Caused by:|BUILD FAILED|.*tests? (completed|failed)|.*there were failing tests.*|> )' "$log_file" | grep -v '^> Task ' | tail -n 5 || true
+              } | awk '!seen[$0]++'
             )
             if [[ "${#diagnostic_lines[@]}" -eq 0 ]]; then
-              mapfile -t diagnostic_lines < <(tail -n 20 "$log_file")
+              mapfile -t diagnostic_lines < <(tail -n 10 "$log_file")
             fi
             {
               echo "### Gradle test/lint diagnostics"
