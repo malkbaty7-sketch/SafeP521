@@ -1,5 +1,3 @@
-@file:kotlin.OptIn(androidx.media3.common.util.UnstableApi::class)
-
 package com.example.ui.glass
 
 import android.graphics.Bitmap
@@ -152,6 +150,7 @@ data class LiquidGlassConfig(
  * - [tintColor] for color blending with the live blurred video frame underneath.
  */
 @Stable
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class LiquidGlassController(
     initialConfig: LiquidGlassConfig = LiquidGlassConfig()
 ) {

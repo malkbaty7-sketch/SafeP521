@@ -1,5 +1,3 @@
-@file:kotlin.OptIn(androidx.media3.common.util.UnstableApi::class)
-
 package com.example.processing
 
 import android.content.Context
@@ -20,6 +18,7 @@ sealed class ExportState {
     data class Error(val exception: Exception) : ExportState()
 }
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class MediaProcessingEngine(private val context: Context) {
 
     fun executeTrim(

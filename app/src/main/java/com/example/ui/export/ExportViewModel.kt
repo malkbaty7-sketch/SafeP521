@@ -1,5 +1,3 @@
-@file:kotlin.OptIn(androidx.media3.common.util.UnstableApi::class)
-
 package com.example.ui.export
 
 import androidx.lifecycle.ViewModel
@@ -15,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class ExportViewModel(
     private val exportEngine: ExportEngine,
     private val exportTaskDao: ExportTaskDao
