@@ -9,6 +9,7 @@ import android.provider.MediaStore
 import com.example.data.MediaItem
 import com.example.data.MediaRepository
 import com.example.data.MediaType
+import com.example.data.MediaFileSupport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -118,10 +119,7 @@ class MediaScanner(
                     val parentName = if (path.isNotBlank()) File(path).parentFile?.name?.takeIf { it.isNotBlank() } else null
                     val folder: String = bucketName?.takeIf { it.isNotBlank() } ?: parentName ?: "Videos"
 
-                    val validVideoExts = listOf("mp4", "mkv", "webm", "avi", "3gp", "mov", "flv", "ts", "m4v")
-                    val isVideoExt = validVideoExts.any { name.endsWith(".$it", ignoreCase = true) || path.endsWith(".$it", ignoreCase = true) }
-                    val isVideoMime = mime?.startsWith("video/", ignoreCase = true) == true
-                    if (size > 0 && (isVideoExt || isVideoMime)) {
+                    if (size > 0 && MediaFileSupport.isSupportedMedia(MediaType.VIDEO, name, mime, path)) {
                         currentPaths.add(uri)
                         val result = processItem(uri, name, folder, MediaType.VIDEO, size, date, duration, mime, null, null)
                         if (result == 1) newCount++
@@ -161,10 +159,7 @@ class MediaScanner(
                     val parentName = if (path.isNotBlank()) File(path).parentFile?.name?.takeIf { it.isNotBlank() } else null
                     val folder: String = parentName ?: album?.takeIf { it.isNotBlank() } ?: "Music"
 
-                    val validAudioExts = listOf("mp3", "m4a", "aac", "wav", "ogg", "flac", "opus", "wma", "amr")
-                    val isAudioExt = validAudioExts.any { name.endsWith(".$it", ignoreCase = true) || path.endsWith(".$it", ignoreCase = true) }
-                    val isAudioMime = mime?.startsWith("audio/", ignoreCase = true) == true
-                    if (size > 0 && (isAudioExt || isAudioMime)) {
+                    if (size > 0 && MediaFileSupport.isSupportedMedia(MediaType.AUDIO, name, mime, path)) {
                         currentPaths.add(uri)
                         val result = processItem(uri, name, folder, MediaType.AUDIO, size, date, duration, mime, artist, album)
                         if (result == 1) newCount++
@@ -241,11 +236,16 @@ class MediaScanner(
                 )
             )
             return 1
-        } else if (existing.sizeBytes != size || existing.dateModified != date) {
+        } else if (
+            existing.name != name || existing.folder != folder || existing.mediaType != type ||
+            existing.sizeBytes != size || existing.dateModified != date || existing.durationMs != duration ||
+            existing.mimeType != mime || existing.artist != artist || existing.album != album || existing.isMissing
+        ) {
             repository.insertOrUpdate(
                 existing.copy(
                     name = name,
                     folder = folder,
+                    mediaType = type,
                     sizeBytes = size,
                     dateModified = date,
                     durationMs = duration,

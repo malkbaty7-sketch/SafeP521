@@ -43,6 +43,7 @@ import com.example.R
 import com.example.data.MediaItem
 import com.example.data.MediaType
 import com.example.data.WatchedState
+import com.example.data.isSupportedMedia
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 
@@ -74,25 +75,10 @@ fun HomeScreen(
     val rawFavorites by viewModel.favorites.collectAsState()
     val rawAllMedia by viewModel.allMedia.collectAsState()
 
-    val validVideoExts = remember { listOf("mp4", "mkv", "webm", "avi", "3gp", "mov", "flv", "ts", "m4v") }
-    val validAudioExts = remember { listOf("mp3", "m4a", "aac", "wav", "ogg", "flac", "opus", "wma", "amr") }
-
-    // Filter protected items and strictly guarantee ONLY video and audio files with actual media content are displayed
+    // The library and every folder below only include supported audio/video items.
     val allMedia = remember(rawAllMedia, protectedMediaIds) {
         rawAllMedia.filter { item ->
-            if (item.id in protectedMediaIds) return@filter false
-            val isAudio = item.mediaType == MediaType.AUDIO
-            val isVideo = item.mediaType == MediaType.VIDEO
-            if (!isAudio && !isVideo) return@filter false
-
-            val ext = item.name.substringAfterLast('.', "").lowercase()
-            val pathExt = item.path.substringAfterLast('.', "").lowercase()
-            val matchesExt = if (isVideo) {
-                validVideoExts.contains(ext) || validVideoExts.contains(pathExt) || item.mimeType?.startsWith("video/") == true
-            } else {
-                validAudioExts.contains(ext) || validAudioExts.contains(pathExt) || item.mimeType?.startsWith("audio/") == true
-            }
-            matchesExt
+            item.id !in protectedMediaIds && !item.isMissing && item.isSupportedMedia()
         }
     }
     val continueWatching = remember(rawContinueWatching, allMedia) {

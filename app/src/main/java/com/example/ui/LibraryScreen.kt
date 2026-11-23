@@ -34,6 +34,7 @@ import com.example.R
 import com.example.data.MediaItem
 import com.example.data.MediaType
 import com.example.data.WatchedState
+import com.example.data.isSupportedMedia
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +65,7 @@ fun LibraryScreen(
     }
 
     val items = allItems
+        .filter { it.isSupportedMedia() }
         .filter { !it.isMissing }
         .filter {
             when (filterMode) {

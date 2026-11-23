@@ -254,7 +254,7 @@ fun StorageDashboardScreen(
                                     relinkLauncher.launch(
                                         Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                                             addCategory(Intent.CATEGORY_OPENABLE)
-                                            type = "*/*"
+                                            type = if (missingItem.mediaType == com.example.data.MediaType.VIDEO) "video/*" else "audio/*"
                                             addFlags(
                                                 Intent.FLAG_GRANT_READ_URI_PERMISSION or
                                                     Intent.FLAG_GRANT_WRITE_URI_PERMISSION or

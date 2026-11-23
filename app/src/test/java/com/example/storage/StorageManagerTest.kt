@@ -195,6 +195,23 @@ class StorageManagerTest {
     }
 
     @Test
+    fun `relinkMedia rejects non-media documents`() = runTest {
+        val testRoot = newTestDirectory()
+        val missingItemId = insertMedia(
+            path = File(testRoot, "missing.mp4").absolutePath,
+            name = "missing.mp4",
+            isMissing = true
+        )
+        val document = File(testRoot, "notes.pdf").apply { writeText("not media") }
+
+        val result = storageManager.relinkMedia(missingItemId, document.absolutePath)
+
+        assertTrue(result.isFailure)
+        assertEquals(File(testRoot, "missing.mp4").absolutePath, database.mediaDao().getMediaByIdSync(missingItemId)?.path)
+        testRoot.deleteRecursively()
+    }
+
+    @Test
     fun `reconcileDatabase marks confirmed missing local files`() = runTest {
         val testRoot = newTestDirectory()
         val mediaId = insertMedia(File(testRoot, "gone.mp4").absolutePath, "gone.mp4")

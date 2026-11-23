@@ -18,7 +18,9 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.example.R
+import com.example.data.MediaFileSupport
 import com.example.data.MediaRepository
+import com.example.data.MediaType
 import com.example.data.WatchedState
 import com.example.security.SecurityAction
 import com.google.common.util.concurrent.ListenableFuture
@@ -252,6 +254,7 @@ class PlayerViewModel(
     }
 
     fun loadStreamUrl(url: String, title: String) {
+        clearSubtitles()
         currentMediaId = -1
         _currentMedia.value = com.example.data.MediaItem(
             id = -1,
@@ -275,6 +278,7 @@ class PlayerViewModel(
     }
 
     fun loadSubtitleText(name: String, content: String) {
+        if (_currentMedia.value?.mediaType != MediaType.VIDEO) return
         val cues = parseSubtitles(content)
         if (cues.isNotEmpty()) {
             _subtitleFileName.value = name
@@ -334,6 +338,10 @@ class PlayerViewModel(
     }
 
     fun loadMediaItem(dbItem: com.example.data.MediaItem, startMs: Long? = null) {
+        if (dbItem.id >= 0 && !MediaFileSupport.isSupportedMedia(dbItem.mediaType, dbItem.name, dbItem.mimeType, dbItem.path)) {
+            stopAndClearMedia()
+            return
+        }
         val requestId = mediaLoadRequestIds.incrementAndGet()
         viewModelScope.launch {
             val securityManager = safeApp?.securityManager
@@ -351,6 +359,7 @@ class PlayerViewModel(
 
     private fun loadAuthorizedMediaItem(dbItem: com.example.data.MediaItem, startMs: Long?) {
         val isSameMedia = currentMediaId == dbItem.id && player?.currentMediaItem != null
+        if (!isSameMedia) clearSubtitles()
         _currentMedia.value = dbItem
         currentMediaId = dbItem.id
 
@@ -402,6 +411,7 @@ class PlayerViewModel(
 
     fun stopAndClearMedia() {
         mediaLoadRequestIds.incrementAndGet()
+        clearSubtitles()
         savePosition(false)
         player?.pause()
         player?.clearMediaItems()
@@ -1033,15 +1043,26 @@ class PlayerViewModel(
     }
 
     fun loadExternalSubtitleFromUri(context: Context, uri: Uri, onResult: (Boolean, Int) -> Unit) {
+        if (_currentMedia.value?.mediaType != MediaType.VIDEO) {
+            onResult(false, 0)
+            return
+        }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 try {
-                    var fileName = "subtitle.srt"
-                    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val fileName = context.contentResolver.query(
+                        uri,
+                        arrayOf(OpenableColumns.DISPLAY_NAME),
+                        null,
+                        null,
+                        null
+                    )?.use { cursor ->
                         val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                        if (nameIdx >= 0 && cursor.moveToFirst()) {
-                            fileName = cursor.getString(nameIdx) ?: fileName
-                        }
+                        if (nameIdx >= 0 && cursor.moveToFirst()) cursor.getString(nameIdx) else null
+                    } ?: uri.lastPathSegment.orEmpty()
+                    val mimeType = context.contentResolver.getType(uri)
+                    if (!MediaFileSupport.isSupportedSubtitleFile(fileName, mimeType)) {
+                        return@withContext Pair<String?, List<SubtitleCue>>(null, emptyList())
                     }
                     val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
                         ?: return@withContext Pair<String?, List<SubtitleCue>>(null, emptyList())
@@ -1066,6 +1087,7 @@ class PlayerViewModel(
     }
 
     fun loadSampleArabicSubtitles() {
+        if (_currentMedia.value?.mediaType != MediaType.VIDEO) return
         val totalDur = (_duration.value).coerceAtLeast(180_000L)
         val demoCues = mutableListOf<SubtitleCue>()
         var t = 0L

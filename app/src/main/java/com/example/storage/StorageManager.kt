@@ -10,10 +10,14 @@ import android.os.Build
 import android.os.StatFs
 import android.provider.DocumentsContract
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
 import com.example.data.MediaDao
 import com.example.data.MediaItem
+import com.example.data.MediaFileSupport
+import com.example.data.MediaType
+import com.example.data.isSupportedMedia
 import com.example.security.SecurityAction
 import com.example.security.SecurityManager
 import com.example.storage.data.StorageLocation
@@ -186,14 +190,16 @@ class StorageManager(
     }
 
     suspend fun getLibrarySize(): Long = withContext(Dispatchers.IO) {
-        mediaDao.getAllMediaSync().sumOf { it.sizeBytes.coerceAtLeast(0L) }
+        mediaDao.getAllMediaSync().asSequence()
+            .filter { it.isSupportedMedia() }
+            .sumOf { it.sizeBytes.coerceAtLeast(0L) }
     }
 
     /** Reconcile local paths and SAF URIs without treating revoked grants as missing files. */
     suspend fun reconcileDatabase(): ReconciliationReport = withContext(Dispatchers.IO) {
         var missingCount = 0
         var unverifiedCount = 0
-        val snapshot = mediaDao.getAllMediaSync()
+        val snapshot = mediaDao.getAllMediaSync().filter { it.isSupportedMedia() }
         for (item in snapshot) {
             withMediaOperation(item.id) {
                 val media = mediaDao.getMediaByIdSync(item.id) ?: return@withMediaOperation
@@ -208,7 +214,10 @@ class StorageManager(
             }
         }
 
-        val knownPaths = mediaDao.getAllMediaSync().mapTo(mutableSetOf()) { it.path }
+        val knownPaths = mediaDao.getAllMediaSync()
+            .asSequence()
+            .filter { it.isSupportedMedia() }
+            .mapTo(mutableSetOf()) { it.path }
         ReconciliationReport(
             missing = missingCount,
             untracked = countUntrackedMediaStoreItems(knownPaths),
@@ -271,6 +280,15 @@ class StorageManager(
             if (candidatePath.isEmpty()) {
                 return@withContext Result.failure(IllegalArgumentException("Select a valid file"))
             }
+            val candidateUri = parseUri(candidatePath)
+            val candidateName = mediaDisplayName(candidatePath, candidateUri)
+            val candidateMimeType = candidateUri
+                ?.takeIf { it.scheme.equals("content", ignoreCase = true) }
+                ?.let { runCatching { context.contentResolver.getType(it) }.getOrNull() }
+            if (!MediaFileSupport.isSupportedMedia(media.mediaType, candidateName, candidateMimeType, candidatePath)) {
+                val expected = if (media.mediaType == MediaType.VIDEO) "video" else "audio"
+                return@withContext Result.failure(IllegalArgumentException("Select a supported $expected file, not a document or another media type"))
+            }
             when (pathAvailability(candidatePath)) {
                 true -> Unit
                 false -> return@withContext Result.failure(FileNotFoundException("The selected file cannot be opened"))
@@ -288,7 +306,14 @@ class StorageManager(
             }
 
             try {
-                mediaDao.updateMedia(media.copy(path = candidatePath, isMissing = false))
+                mediaDao.updateMedia(
+                    media.copy(
+                        path = candidatePath,
+                        name = candidateName ?: media.name,
+                        mimeType = candidateMimeType ?: media.mimeType,
+                        isMissing = false
+                    )
+                )
                 Result.success(Unit)
             } catch (error: CancellationException) {
                 throw error
@@ -772,6 +797,27 @@ class StorageManager(
     }
 
     private fun parseUri(path: String): Uri? = runCatching { Uri.parse(path) }.getOrNull()
+
+    private fun mediaDisplayName(path: String, uri: Uri?): String? {
+        if (uri?.scheme?.equals("content", ignoreCase = true) == true) {
+            val queriedName = runCatching {
+                context.contentResolver.query(
+                    uri,
+                    arrayOf(OpenableColumns.DISPLAY_NAME),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    val nameColumn = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameColumn >= 0 && cursor.moveToFirst()) cursor.getString(nameColumn) else null
+                }
+            }.getOrNull()
+            return queriedName
+                ?: runCatching { DocumentFile.fromSingleUri(context, uri)?.name }.getOrNull()
+                ?: uri.lastPathSegment
+        }
+        return File(uri?.path ?: path).name.takeIf { it.isNotBlank() }
+    }
 
     private fun fileForPath(path: String): File? {
         val uri = parseUri(path) ?: return null

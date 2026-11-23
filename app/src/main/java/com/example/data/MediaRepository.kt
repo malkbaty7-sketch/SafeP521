@@ -1,25 +1,35 @@
 package com.example.data
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 class MediaRepository(private val mediaDao: MediaDao) {
-    val allMedia: Flow<List<MediaItem>> = mediaDao.getAllMedia()
-    val videos: Flow<List<MediaItem>> = mediaDao.getMediaByType(MediaType.VIDEO)
-    val audios: Flow<List<MediaItem>> = mediaDao.getMediaByType(MediaType.AUDIO)
-    val favorites: Flow<List<MediaItem>> = mediaDao.getFavorites()
+    val allMedia: Flow<List<MediaItem>> = mediaDao.getAllMedia().map { items -> items.filter { it.isSupportedMedia() } }
+    val videos: Flow<List<MediaItem>> = mediaDao.getMediaByType(MediaType.VIDEO).map { items -> items.filter { it.isSupportedMedia() } }
+    val audios: Flow<List<MediaItem>> = mediaDao.getMediaByType(MediaType.AUDIO).map { items -> items.filter { it.isSupportedMedia() } }
+    val favorites: Flow<List<MediaItem>> = mediaDao.getFavorites().map { items -> items.filter { it.isSupportedMedia() } }
     val continueWatching: Flow<List<MediaItem>> = mediaDao.getByWatchedState(WatchedState.IN_PROGRESS)
+        .map { items -> items.filter { it.isSupportedMedia() } }
 
-    fun getMediaById(id: Int): Flow<MediaItem?> = mediaDao.getMediaById(id)
+    fun getMediaById(id: Int): Flow<MediaItem?> = mediaDao.getMediaById(id).map { item ->
+        item?.takeIf { it.isSupportedMedia() }
+    }
 
     suspend fun insertOrUpdate(media: MediaItem) {
+        require(media.isSupportedMedia()) { "Only supported audio and video files can be added to the media library" }
         val existing = mediaDao.getMediaByPath(media.path)
         if (existing != null) {
             val updated = existing.copy(
                 name = media.name,
                 folder = media.folder,
+                mediaType = media.mediaType,
                 sizeBytes = media.sizeBytes,
                 dateModified = media.dateModified,
-                durationMs = media.durationMs
+                durationMs = media.durationMs,
+                mimeType = media.mimeType,
+                artist = media.artist,
+                album = media.album,
+                isMissing = media.isMissing
             )
             mediaDao.updateMedia(updated)
         } else {
@@ -66,9 +76,11 @@ class MediaRepository(private val mediaDao: MediaDao) {
     suspend fun addMediaToPlaylist(playlistId: Int, mediaId: Int, orderIndex: Int = 0) = mediaDao.addMediaToPlaylist(PlaylistMediaCrossRef(playlistId, mediaId, orderIndex))
     suspend fun removeMediaFromPlaylist(playlistId: Int, mediaId: Int) = mediaDao.removeMediaFromPlaylist(playlistId, mediaId)
     fun getMediaForPlaylist(playlistId: Int): Flow<List<MediaItem>> = mediaDao.getMediaForPlaylist(playlistId)
+        .map { items -> items.filter { it.isSupportedMedia() } }
 
     // --- Media Integrity & Relink ---
     val missingMedia: Flow<List<MediaItem>> = mediaDao.getMissingMedia()
+        .map { items -> items.filter { it.isSupportedMedia() } }
     suspend fun relinkMedia(mediaId: Int, newPath: String) = mediaDao.relinkMedia(mediaId, newPath)
 
     // --- Scan Job ---
