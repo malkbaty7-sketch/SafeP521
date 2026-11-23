@@ -5,6 +5,7 @@
 
 package com.example.ui.player
 
+import androidx.compose.foundation.BorderStroke
 import android.app.Activity
 import android.app.PictureInPictureParams
 import android.content.Context
@@ -515,6 +516,7 @@ fun PlayerScreen(
                             textAlign = TextAlign.Center
                         )
                         FilledTonalButton(
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
                             onClick = { viewModel.seekRelative(5000L) }
                         ) {
                             Icon(Icons.Default.FastForward, contentDescription = null)
@@ -661,7 +663,7 @@ fun PlayerScreen(
                         Icon(
                             imageVector = if (doubleTapSide == -1) Icons.Default.Replay10 else Icons.Default.Forward10,
                             contentDescription = null,
-                            tint = Color(0xFF00E5FF),
+                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(28.dp)
                         )
                         Spacer(Modifier.width(8.dp))
@@ -754,7 +756,7 @@ fun PlayerScreen(
                                 )
                                 Text(
                                     text = "Liquid Glass • Blur ${liquidGlassConfig.blurRadius.toInt()}px • ${(liquidGlassConfig.glassOpacity * 100).toInt()}%",
-                                    color = Color(0xFF80DEEA),
+                                    color = MaterialTheme.colorScheme.primary,
                                     fontSize = 9.5.sp,
                                     fontWeight = FontWeight.Medium,
                                     maxLines = 1
@@ -766,7 +768,7 @@ fun PlayerScreen(
                                 icon = Icons.Default.BlurOn,
                                 contentDescription = "Liquid Glass Studio",
                                 isActive = showLiquidGlassSheet,
-                                iconTint = Color(0xFF00E5FF),
+                                iconTint = MaterialTheme.colorScheme.primary,
                                 onClick = { showLiquidGlassSheet = true },
                                 size = 34.dp,
                                 iconSize = 19.dp,
@@ -832,9 +834,9 @@ fun PlayerScreen(
                         onDismissRequest = { showMoreMenu = false },
                         items = listOf(
                             LiquidGlassMenuItem(
-                                title = "استوديو الزجاج السائل 💧",
+                                title = "استوديو الزجاج السائل",
                                 icon = Icons.Default.BlurOn,
-                                iconTint = Color(0xFF00E5FF),
+                                iconTint = MaterialTheme.colorScheme.primary,
                                 badgeText = "${liquidGlassConfig.blurRadius.toInt()}px",
                                 onClick = {
                                     showMoreMenu = false
@@ -904,7 +906,7 @@ fun PlayerScreen(
                         // Liquid Glass Studio Quick Pill (الزجاج السائل 💧)
                         PlayerPillAction(
                             icon = Icons.Default.BlurOn,
-                            label = "الزجاج السائل 💧",
+                            label = "الزجاج السائل",
                             isActive = showLiquidGlassSheet,
                             onClick = { showLiquidGlassSheet = true }
                         )
@@ -913,7 +915,7 @@ fun PlayerScreen(
                         if (!isAudio) {
                             PlayerPillAction(
                                 icon = Icons.Default.PhotoCamera,
-                                label = "لقطة شاشة 📸",
+                                label = "لقطة شاشة",
                                 isActive = false,
                                 onClick = {
                                     viewModel.captureVideoSnapshot(context) { success, fileName, _ ->
@@ -937,7 +939,7 @@ fun PlayerScreen(
                             // Live Video Filters (فلاتر الصورة والألوان 🎨)
                             PlayerPillAction(
                                 icon = Icons.Default.Palette,
-                                label = if (videoFilterPreset != "Normal") "فلتر ($videoFilterPreset)" else "فلاتر الصورة 🎨",
+                                label = if (videoFilterPreset != "Normal") "فلتر ($videoFilterPreset)" else "فلاتر الصورة",
                                 isActive = videoFilterPreset != "Normal" || filterBrightness != 0f || filterContrast != 1f || filterSaturation != 1f,
                                 onClick = { showVideoFiltersDialog = true }
                             )
@@ -1221,8 +1223,8 @@ fun PlayerScreen(
                                         .height(32.dp)
                                         .padding(horizontal = 8.dp),
                                     colors = SliderDefaults.colors(
-                                        thumbColor = Color(0xFF00E5FF),
-                                        activeTrackColor = Color(0xFF00E5FF),
+                                        thumbColor = MaterialTheme.colorScheme.primary,
+                                        activeTrackColor = MaterialTheme.colorScheme.primary,
                                         inactiveTrackColor = Color.White.copy(alpha = 0.28f)
                                     )
                                 )
@@ -1378,7 +1380,7 @@ fun PlayerScreen(
             title = stringResource(R.string.player_video_info),
             confirmButton = {
                 TextButton(onClick = { showInfoDialog = false }) {
-                    Text(stringResource(R.string.action_close), color = Color(0xFF00E5FF))
+                    Text(stringResource(R.string.action_close), color = MaterialTheme.colorScheme.primary)
                 }
             }
         ) {
@@ -1413,7 +1415,10 @@ fun PlayerScreen(
                 )
             },
             confirmButton = {
-                Button(onClick = { showEqualizerDialog = false }) {
+                Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                    onClick = { showEqualizerDialog = false }
+                    ) {
                     Text("تم")
                 }
             },
@@ -1465,7 +1470,7 @@ fun PlayerScreen(
                     )
                     Text(
                         text = "${if (levelDb >= 0) "+" else ""}${levelDb.toInt()}dB",
-                        color = Color(0xFF00E5FF),
+                        color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.width(46.dp),
                         textAlign = TextAlign.End,
                         style = MaterialTheme.typography.labelSmall
@@ -1480,7 +1485,7 @@ fun PlayerScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text("تضخيم الصوت الجهوري (Bass Boost)", color = Color.White, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
-                Text("$bassBoostLevel%", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+                Text("$bassBoostLevel%", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             }
             Slider(
                 value = bassBoostLevel.toFloat(),
@@ -1522,7 +1527,10 @@ fun PlayerScreen(
                 )
             },
             confirmButton = {
-                Button(onClick = { showSubtitlesDialog = false }) {
+                Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                    onClick = { showSubtitlesDialog = false }
+                    ) {
                     Text("إغلاق")
                 }
             },
@@ -1559,6 +1567,7 @@ fun PlayerScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                     onClick = {
                         subtitlePickerLauncher.launch(
                             arrayOf("application/x-subrip", "text/vtt", "application/vtt", "text/plain", "application/octet-stream")
@@ -1571,6 +1580,7 @@ fun PlayerScreen(
                     Text("اختيار ملف ترجمة (SRT/VTT)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
                 FilledTonalButton(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
                     onClick = {
                         viewModel.loadSampleArabicSubtitles()
                         Toast.makeText(context, "تم تفعيل الترجمة التجريبية العربية 📝", Toast.LENGTH_SHORT).show()
@@ -1607,7 +1617,7 @@ fun PlayerScreen(
                 Text("مزامنة توقيت الترجمة:", color = Color.White, fontWeight = FontWeight.SemiBold)
                 Text(
                     text = String.format("%+.1f ثانية", delaySeconds),
-                    color = Color(0xFF00E5FF),
+                    color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -1625,7 +1635,7 @@ fun PlayerScreen(
                 ) { Text("-0.1s", color = Color.White) }
                 TextButton(
                     onClick = { viewModel.resetSubtitleDelay() }
-                ) { Text("0.0s", color = Color(0xFF00E5FF)) }
+                ) { Text("0.0s", color = MaterialTheme.colorScheme.primary) }
                 OutlinedButton(
                     onClick = { viewModel.adjustSubtitleDelay(100L) },
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
@@ -1643,7 +1653,7 @@ fun PlayerScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text("حجم خط الترجمة:", color = Color.White, fontWeight = FontWeight.SemiBold)
-                Text("${subtitleFontSizeSp.toInt()} SP", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+                Text("${subtitleFontSizeSp.toInt()} SP", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             }
             Slider(
                 value = subtitleFontSizeSp,
@@ -1724,6 +1734,7 @@ fun PlayerScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (sleepTimerMinutes != -1) {
                                 FilledTonalButton(
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
                                     onClick = {
                                         viewModel.extendSleepTimer(5)
                                         Toast.makeText(context, "تم تمديد مؤقت النوم +5 دقائق ⏰", Toast.LENGTH_SHORT).show()
@@ -1846,7 +1857,7 @@ fun PlayerScreen(
                             Icon(
                                 imageVector = if (isCurrent) Icons.Default.PlayArrow else Icons.Default.VideoLibrary,
                                 contentDescription = null,
-                                tint = if (isCurrent) Color(0xFF00E5FF) else Color.White
+                                tint = if (isCurrent) MaterialTheme.colorScheme.primary else Color.White
                             )
                             Spacer(Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
@@ -1877,6 +1888,7 @@ fun PlayerScreen(
             title = "حفظ علامة مرجعية 🔖",
             confirmButton = {
                 Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                     onClick = {
                         val title = bookmarkNoteInput.ifBlank { "علامة عند ${formatDuration(bookmarkTime)}" }
                         viewModel.addMarker(bookmarkTime, title)
@@ -1895,7 +1907,7 @@ fun PlayerScreen(
         ) {
             Text(
                 text = "التوقيت المحدد: ${formatDuration(bookmarkTime)}",
-                color = Color(0xFF00E5FF),
+                color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold
             )
             OutlinedTextField(
@@ -1906,7 +1918,7 @@ fun PlayerScreen(
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = Color.White,
                     unfocusedTextColor = Color.White,
-                    focusedBorderColor = Color(0xFF00E5FF),
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = Color.White.copy(alpha = 0.35f)
                 ),
                 modifier = Modifier.fillMaxWidth()
@@ -1920,6 +1932,7 @@ fun PlayerScreen(
             title = "العلامات المرجعية (${markers.size}) 🔖",
             headerAction = {
                 FilledTonalButton(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
                     onClick = {
                         showBookmarksSheet = false
                         bookmarkNoteInput = "مشهد عند ${formatDuration(currentPosition)}"
@@ -1987,7 +2000,7 @@ fun PlayerScreen(
                                     Text(
                                         text = formatDuration(marker.timeMs),
                                         style = MaterialTheme.typography.labelMedium,
-                                        color = Color(0xFF00E5FF)
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                 }
                                 IconButton(onClick = { viewModel.removeMarker(marker.id) }) {
@@ -2020,7 +2033,10 @@ fun PlayerScreen(
             onDismissRequest = { showVideoFiltersDialog = false },
             title = "فلاتر وتحسين الصورة المباشرة 🎨",
             confirmButton = {
-                Button(onClick = { showVideoFiltersDialog = false }) {
+                Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                    onClick = { showVideoFiltersDialog = false }
+                    ) {
                     Text("تطبيق")
                 }
             },
@@ -2054,7 +2070,7 @@ fun PlayerScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text("إضاءة الفيديو (Brightness):", color = Color.White, fontWeight = FontWeight.SemiBold)
-                Text("${(filterBrightness * 100).toInt()}%", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+                Text("${(filterBrightness * 100).toInt()}%", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             }
             Slider(
                 value = filterBrightness,
@@ -2067,7 +2083,7 @@ fun PlayerScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text("التباين (Contrast):", color = Color.White, fontWeight = FontWeight.SemiBold)
-                Text("${(filterContrast * 100).toInt()}%", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+                Text("${(filterContrast * 100).toInt()}%", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             }
             Slider(
                 value = filterContrast,
@@ -2080,7 +2096,7 @@ fun PlayerScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text("تشبع الألوان (Saturation):", color = Color.White, fontWeight = FontWeight.SemiBold)
-                Text("${(filterSaturation * 100).toInt()}%", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+                Text("${(filterSaturation * 100).toInt()}%", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             }
             Slider(
                 value = filterSaturation,
@@ -2120,6 +2136,7 @@ fun PlayerScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         FilledTonalButton(
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
                             onClick = {
                                 viewModel.addSafeWatchRule(
                                     startMs = currentPosition,
@@ -2135,6 +2152,7 @@ fun PlayerScreen(
                             Text("⏩ تخطي", fontSize = 12.sp)
                         }
                         FilledTonalButton(
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
                             onClick = {
                                 viewModel.addSafeWatchRule(
                                     startMs = currentPosition,
@@ -2150,6 +2168,7 @@ fun PlayerScreen(
                             Text("🔇 كتم صوت", fontSize = 12.sp)
                         }
                         FilledTonalButton(
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
                             onClick = {
                                 viewModel.addSafeWatchRule(
                                     startMs = currentPosition,
@@ -2173,6 +2192,7 @@ fun PlayerScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                     onClick = {
                         viewModel.generateDemoAiSafeWatchRules()
                         Toast.makeText(context, "🤖 تم توليد 3 قواعد حماية ذكية (تخطي + كتم + تعتيم) على الشريط الزمني!", Toast.LENGTH_LONG).show()
@@ -2258,7 +2278,7 @@ fun PlayerScreen(
                                     Text(
                                         text = "$badgeText • من ${formatDuration(rule.timeMs)} إلى ${formatDuration(endMs)}",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = Color(0xFF00E5FF)
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                 }
                                 IconButton(onClick = { viewModel.removeMarker(rule.id) }) {
@@ -2278,6 +2298,7 @@ fun PlayerScreen(
             title = "استيراد ملف الحماية العائلية (.safeplay)",
             confirmButton = {
                 Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                     onClick = {
                         viewModel.importSafeWatchRulesJson(importSafeWatchJsonInput) { ok, count ->
                             if (ok) {
@@ -2313,7 +2334,7 @@ fun PlayerScreen(
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = Color.White,
                     unfocusedTextColor = Color.White,
-                    focusedBorderColor = Color(0xFF00E5FF),
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = Color.White.copy(alpha = 0.35f)
                 ),
                 modifier = Modifier.fillMaxWidth()
@@ -2357,10 +2378,10 @@ private fun GestureOverlayIndicator(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF00E5FF).copy(alpha = 0.2f)),
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(icon, contentDescription = label, tint = Color(0xFF00E5FF), modifier = Modifier.size(28.dp))
+                Icon(icon, contentDescription = label, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
             }
             Text(
                 text = label,
@@ -2374,7 +2395,7 @@ private fun GestureOverlayIndicator(
                     .width(140.dp)
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp)),
-                color = Color(0xFF00E5FF),
+                color = MaterialTheme.colorScheme.primary,
                 trackColor = Color.White.copy(alpha = 0.25f)
             )
             Text(

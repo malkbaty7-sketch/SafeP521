@@ -1,10 +1,12 @@
 package com.example.ui.playlists
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -13,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.theme.SafeIconButton
+import com.example.ui.theme.SafeTopAppBar
 import com.example.SafePlayerApp
 import com.example.data.MediaItem
 import com.example.data.MediaType
@@ -42,12 +46,16 @@ fun PlaylistsScreen(
 
         Scaffold(
             topBar = {
-                TopAppBar(
+                SafeTopAppBar(
                     title = { Text(current.name, fontWeight = FontWeight.Bold) },
                     navigationIcon = {
-                        IconButton(onClick = { selectedPlaylist = null }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                        }
+                        SafeIconButton(
+                            icon = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            onClick = { selectedPlaylist = null },
+                            size = 40.dp,
+                            iconSize = 20.dp
+                        )
                     },
                     actions = {
                         IconButton(onClick = {
@@ -76,6 +84,7 @@ fun PlaylistsScreen(
                 if (playlistItems.isEmpty()) {
                     item {
                         Card(
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                         ) {
@@ -93,6 +102,7 @@ fun PlaylistsScreen(
                 } else {
                     items(playlistItems) { item ->
                         Card(
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { onPlayMedia(item.id) },
@@ -134,12 +144,16 @@ fun PlaylistsScreen(
     // Main Playlists Overview
     Scaffold(
         topBar = {
-            TopAppBar(
+            SafeTopAppBar(
                 title = { Text("Playlists", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                    }
+                    SafeIconButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        onClick = onNavigateBack,
+                        size = 40.dp,
+                        iconSize = 20.dp
+                    )
                 }
             )
         },
@@ -163,6 +177,7 @@ fun PlaylistsScreen(
         ) {
             item {
                 Card(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
                 ) {
@@ -184,6 +199,7 @@ fun PlaylistsScreen(
             if (playlists.isEmpty()) {
                 item {
                     Card(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
@@ -193,7 +209,10 @@ fun PlaylistsScreen(
                                 Spacer(Modifier.height(8.dp))
                                 Text("No playlists created yet", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.height(8.dp))
-                                Button(onClick = { showCreateDialog = true }) {
+                                Button(
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                                    onClick = { showCreateDialog = true }
+                                    ) {
                                     Text("Create First Playlist")
                                 }
                             }
@@ -203,6 +222,7 @@ fun PlaylistsScreen(
             } else {
                 items(playlists) { playlist ->
                     Card(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { selectedPlaylist = playlist },
@@ -244,6 +264,7 @@ fun PlaylistsScreen(
             },
             confirmButton = {
                 Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                     onClick = {
                         if (newPlaylistName.isNotBlank()) {
                             scope.launch {

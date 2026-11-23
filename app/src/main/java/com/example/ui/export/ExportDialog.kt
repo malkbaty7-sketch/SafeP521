@@ -1,5 +1,6 @@
 package com.example.ui.export
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -96,7 +97,10 @@ fun ExportDialog(
                     Text("Cancel Export")
                 }
             } else {
-                Button(onClick = { viewModel.startExport(project, operations, selectedQuality) }) {
+                Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                    onClick = { viewModel.startExport(project, operations, selectedQuality) }
+                    ) {
                     Text("Start Export")
                 }
             }

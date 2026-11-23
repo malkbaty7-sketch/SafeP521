@@ -1,5 +1,6 @@
 package com.example.ui.security
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -44,6 +45,7 @@ fun AppLockOverlay(
             contentAlignment = Alignment.Center
         ) {
             Card(
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                 modifier = Modifier
                     .fillMaxWidth()
                     .wrapContentHeight(),
@@ -139,6 +141,7 @@ fun AppLockOverlay(
                         }
 
                         Button(
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                             onClick = {
                                 scope.launch {
                                     val remainingCooldown = securityManager.getLockoutRemainingSeconds()

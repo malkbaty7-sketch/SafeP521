@@ -1,5 +1,6 @@
 package com.example.ui
 
+import androidx.compose.foundation.BorderStroke
 import android.net.Uri
 import android.text.format.Formatter
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -40,6 +41,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.request.videoFrameMillis
+import com.example.ui.theme.SafeIconButton
+import com.example.ui.theme.SafeTopAppBar
 import com.example.R
 import com.example.SafePlayerApp
 import com.example.ai.AiAnalysisProgress
@@ -294,7 +297,9 @@ fun MediaDetailsScreen(
             },
             confirmButton = {
                 if (!compressState.isCompressing) {
-                    Button(onClick = {
+                    Button(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                        onClick = {
                         com.example.converter.VideoCompressor.compressVideo(
                             context = context,
                             repository = app.repository,
@@ -342,7 +347,9 @@ fun MediaDetailsScreen(
                 )
             },
             confirmButton = {
-                Button(onClick = {
+                Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                    onClick = {
                     viewModel.renameMedia(app, newName)
                     showRenameDialog = false
                 }) {
@@ -364,6 +371,7 @@ fun MediaDetailsScreen(
             text = { Text(stringResource(R.string.desc_delete_media, mediaItem!!.name)) },
             confirmButton = {
                 Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                     onClick = {
                         viewModel.deleteMedia(app, onDeleted = { onNavigateBack() })
                         showDeleteDialog = false
@@ -427,7 +435,9 @@ fun MediaDetailsScreen(
             },
             confirmButton = {
                 if (newPlaylistInputName.isNotBlank()) {
-                    Button(onClick = {
+                    Button(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                        onClick = {
                         scope.launch {
                             val newId = app.repository.createPlaylist(newPlaylistInputName.trim())
                             app.repository.addMediaToPlaylist(newId.toInt(), mediaItem!!.id)
@@ -451,7 +461,7 @@ fun MediaDetailsScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
+            SafeTopAppBar(
                 title = {
                     Text(
                         text = mediaItem?.name ?: stringResource(R.string.title_media_details),
@@ -461,9 +471,13 @@ fun MediaDetailsScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
-                    }
+                    SafeIconButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "رجوع",
+                        onClick = onNavigateBack,
+                        size = 40.dp,
+                        iconSize = 20.dp
+                    )
                 },
                 actions = {
                     // Lock / Unlock toggle
@@ -706,6 +720,7 @@ fun CinematicHeroBackdrop(
     val extension = media.path.substringAfterLast('.', "").uppercase()
 
     Card(
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
@@ -894,6 +909,7 @@ fun QuickActionPillsRow(
     ) {
         item {
             Button(
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                 onClick = onPlayClick,
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
@@ -907,6 +923,7 @@ fun QuickActionPillsRow(
         if (onEditClick != null) {
             item {
                 FilledTonalButton(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
                     onClick = onEditClick,
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -1006,6 +1023,7 @@ fun TechnicalSpecsCard(media: MediaItem, context: android.content.Context, scene
     val formattedSize = remember(media.sizeBytes) { Formatter.formatFileSize(context, media.sizeBytes) }
 
     Card(
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
@@ -1082,6 +1100,7 @@ fun SpecRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String
 fun VisualSceneCard(scene: Scene, onClick: () -> Unit) {
     val duration = scene.endTimeMs - scene.startTimeMs
     Card(
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
         modifier = Modifier
             .width(160.dp)
             .clickable(onClick = onClick),
@@ -1168,6 +1187,7 @@ fun SceneAnalyzerSection(
     val isStale = media.analysisStatus == "COMPLETED" && (media.analyzedSize != media.sizeBytes || media.analyzedDate != media.dateModified)
 
     Card(
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
@@ -1182,7 +1202,9 @@ fun SceneAnalyzerSection(
             Spacer(Modifier.height(8.dp))
 
             if (isStale) {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                Card(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                     Column(Modifier.fillMaxWidth().padding(12.dp)) {
                         Text(stringResource(R.string.status_analysis_stale), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
                         Text(stringResource(R.string.desc_analysis_stale), style = MaterialTheme.typography.bodySmall)
@@ -1192,7 +1214,9 @@ fun SceneAnalyzerSection(
             }
 
             if (scanProgress.isScanning && scanProgress.mediaId == media.id) {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                Card(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                     Column(Modifier.fillMaxWidth().padding(14.dp)) {
                         Text(stringResource(R.string.status_analysis_progress, scanProgress.status), fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(8.dp))
@@ -1211,6 +1235,7 @@ fun SceneAnalyzerSection(
                 }
             } else {
                 Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                     onClick = onStartScan,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
@@ -1244,6 +1269,7 @@ fun AiEngineSection(
     val aiStale = media.aiAnalysisStatus == "COMPLETED" && (media.aiAnalyzedSize != media.sizeBytes || media.aiAnalyzedDate != media.dateModified)
 
     Card(
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
@@ -1259,7 +1285,9 @@ fun AiEngineSection(
             Spacer(Modifier.height(8.dp))
 
             if (aiStale) {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                Card(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                     Column(Modifier.fillMaxWidth().padding(12.dp)) {
                         Text(stringResource(R.string.status_ai_stale), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
                         Text(stringResource(R.string.desc_ai_stale), style = MaterialTheme.typography.bodySmall)
@@ -1269,7 +1297,9 @@ fun AiEngineSection(
             }
 
             if (aiProgress.isAnalyzing && aiProgress.mediaId == media.id) {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                Card(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                     Column(Modifier.fillMaxWidth().padding(14.dp)) {
                         Text(stringResource(R.string.status_ai_progress, aiProgress.status), fontWeight = FontWeight.Bold)
                         Text(stringResource(R.string.format_ai_strategy, aiProgress.strategy.toString()), style = MaterialTheme.typography.bodySmall)
@@ -1289,6 +1319,7 @@ fun AiEngineSection(
                 }
             } else {
                 Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                     onClick = onStartAi,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -1307,6 +1338,7 @@ fun AiEngineSection(
             if (aiResults.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 FilledTonalButton(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
                     onClick = onReviewDetections,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)

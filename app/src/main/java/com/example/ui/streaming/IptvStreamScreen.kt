@@ -1,5 +1,6 @@
 package com.example.ui.streaming
 
+import androidx.compose.foundation.BorderStroke
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,6 +28,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.theme.SafeIconButton
+import com.example.ui.theme.SafeTopAppBar
 import com.example.SafePlayerApp
 import com.example.streaming.M3uParser
 import com.example.streaming.StreamChannel
@@ -132,6 +135,7 @@ fun IptvStreamScreen(
             },
             confirmButton = {
                 Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                     onClick = {
                         if (url.isNotBlank()) {
                             scope.launch(Dispatchers.IO) {
@@ -160,12 +164,16 @@ fun IptvStreamScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            SafeTopAppBar(
                 title = { Text("بث IPTV والروابط المباشرة 📡", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
-                    }
+                    SafeIconButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "رجوع",
+                        onClick = onNavigateBack,
+                        size = 40.dp,
+                        iconSize = 20.dp
+                    )
                 },
                 actions = {
                     IconButton(onClick = { m3uPickerLauncher.launch(arrayOf("*/*")) }) {
@@ -246,6 +254,7 @@ fun IptvStreamScreen(
                 ) {
                     items(filteredChannels, key = { it.id }) { channel ->
                         Card(
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { onPlayStreamUrl(channel.url, channel.name) },

@@ -1,5 +1,6 @@
 package com.example.ui.streaming
 
+import androidx.compose.foundation.BorderStroke
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.*
@@ -24,6 +25,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.ui.theme.SafeIconButton
+import com.example.ui.theme.SafeTopAppBar
 import com.example.SafePlayerApp
 import com.example.security.SecurityAction
 import kotlinx.coroutines.launch
@@ -66,12 +69,16 @@ fun WifiTransferScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            SafeTopAppBar(
                 title = { Text("المشاركة والنقل عبر Wi-Fi 📡", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
-                    }
+                    SafeIconButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "رجوع",
+                        onClick = onNavigateBack,
+                        size = 40.dp,
+                        iconSize = 20.dp
+                    )
                 }
             )
         }
@@ -86,6 +93,7 @@ fun WifiTransferScreen(
         ) {
             // Hero Icon & Status Banner
             Card(
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(
@@ -136,6 +144,7 @@ fun WifiTransferScreen(
 
                     // Start / Stop Toggle Button
                     Button(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                         onClick = {
                             if (isRunning) {
                                 server.stop { running, msg ->
@@ -178,9 +187,10 @@ fun WifiTransferScreen(
                 }
             }
 
-            // Connection Details Card (When Running)
+            // Connection details card, shown while the local transfer server is active.
             AnimatedVisibility(visible = isRunning && serverUrl.isNotBlank()) {
                 Card(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
@@ -264,6 +274,7 @@ fun WifiTransferScreen(
 
             // How it works Instructions Card
             Card(
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
