@@ -123,7 +123,6 @@ fun PlayerScreen(
     val subtitleColorIndex by viewModel.subtitleColorIndex.collectAsState()
     val subtitleBgOpacity by viewModel.subtitleBgOpacity.collectAsState()
     val subtitleFontFamilyIndex by viewModel.subtitleFontFamilyIndex.collectAsState()
-    var showOnlineSubtitlesDialog by remember { mutableStateOf(false) }
 
     // Track 2: Live Video Filters State
     val videoFilterPreset by viewModel.videoFilterPreset.collectAsState()
@@ -184,9 +183,14 @@ fun PlayerScreen(
     var isLandscape by remember { mutableStateOf(true) }
 
     val isAudio = currentMedia?.mediaType == com.example.data.MediaType.AUDIO
+    val isVideo = currentMedia?.mediaType == com.example.data.MediaType.VIDEO
 
-    // Set video orientation to landscape by default
+    // Subtitles are only available for video playback; clear any previous video's cues on media changes.
     LaunchedEffect(currentMedia?.id) {
+        if (!isVideo) {
+            viewModel.clearSubtitles()
+            showSubtitlesDialog = false
+        }
         if (!isAudio) {
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             isLandscape = true
@@ -238,7 +242,6 @@ fun PlayerScreen(
         showInfoDialog ||
         showEqualizerDialog ||
         showSubtitlesDialog ||
-        showOnlineSubtitlesDialog ||
         showVideoFiltersDialog ||
         showSleepTimerDialog ||
         showSpeedDialog ||
@@ -549,7 +552,7 @@ fun PlayerScreen(
         }
 
         // Synchronized External Subtitles Overlay (Liquid Glass Subtitle Container)
-        if (subtitlesEnabled && !currentSubtitleText.isNullOrBlank()) {
+        if (isVideo && subtitlesEnabled && !currentSubtitleText.isNullOrBlank()) {
             val subColor = when (subtitleColorIndex) {
                 1 -> Color(0xFFFFEB3B) // Yellow
                 2 -> Color(0xFF00E5FF) // Cyan
@@ -785,17 +788,19 @@ fun PlayerScreen(
 
                             Spacer(Modifier.width(6.dp))
 
-                            // Subtitles CC
-                            LiquidGlassIconButton(
-                                icon = Icons.Default.ClosedCaption,
-                                contentDescription = "Subtitles",
-                                isActive = subtitlesEnabled,
-                                onClick = { showSubtitlesDialog = true },
-                                size = 34.dp,
-                                iconSize = 19.dp
-                            )
+                            if (isVideo) {
+                                // Subtitles are available only while a video is playing.
+                                LiquidGlassIconButton(
+                                    icon = Icons.Default.ClosedCaption,
+                                    contentDescription = "Subtitles",
+                                    isActive = subtitlesEnabled,
+                                    onClick = { showSubtitlesDialog = true },
+                                    size = 34.dp,
+                                    iconSize = 19.dp
+                                )
 
-                            Spacer(Modifier.width(6.dp))
+                                Spacer(Modifier.width(6.dp))
+                            }
 
                             // Playlist
                             LiquidGlassIconButton(
@@ -1018,13 +1023,15 @@ fun PlayerScreen(
                             }
                         )
 
-                        // Subtitles (الترجمة)
-                        PlayerPillAction(
-                            icon = Icons.Default.ClosedCaption,
-                            label = if (subtitlesEnabled) "الترجمة مفعلة" else "الترجمة CC",
-                            isActive = subtitlesEnabled,
-                            onClick = { showSubtitlesDialog = true }
-                        )
+                        if (isVideo) {
+                            // Subtitles (الترجمة)
+                            PlayerPillAction(
+                                icon = Icons.Default.ClosedCaption,
+                                label = if (subtitlesEnabled) "الترجمة مفعلة" else "الترجمة CC",
+                                isActive = subtitlesEnabled,
+                                onClick = { showSubtitlesDialog = true }
+                            )
+                        }
 
                         // Equalizer
                         PlayerPillAction(
@@ -1505,7 +1512,7 @@ fun PlayerScreen(
             3 to ("أخضر" to Color(0xFF69F0AE))
         )
         LiquidGlassDialog(
-            visible = showSubtitlesDialog,
+            visible = showSubtitlesDialog && isVideo,
             onDismissRequest = { showSubtitlesDialog = false },
             title = "إعدادات الترجمة (SRT / VTT) 📝",
             headerTrailing = {
@@ -1554,22 +1561,14 @@ fun PlayerScreen(
                 Button(
                     onClick = {
                         subtitlePickerLauncher.launch(
-                            arrayOf("application/x-subrip", "text/vtt", "text/plain", "*/*")
+                            arrayOf("application/x-subrip", "text/vtt", "application/vtt", "text/plain", "application/octet-stream")
                         )
                     },
                     modifier = Modifier.weight(1.2f)
                 ) {
                     Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("فتح ملف (SRT/VTT)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-                OutlinedButton(
-                    onClick = { showOnlineSubtitlesDialog = true },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Language, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("بحث أونلاين", color = Color.White, fontSize = 11.sp)
+                    Text("اختيار ملف ترجمة (SRT/VTT)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
                 FilledTonalButton(
                     onClick = {
@@ -1688,80 +1687,6 @@ fun PlayerScreen(
                 onValueChange = { viewModel.setSubtitleBgOpacity(it) },
                 valueRange = 0f..1f
             )
-        }
-
-        // LIQUID GLASS DIALOG: Smart Online Subtitles Search & 1-Tap Load
-        if (showOnlineSubtitlesDialog) {
-            var isSearching by remember { mutableStateOf(false) }
-            var searchResults by remember { mutableStateOf<List<com.example.subtitles.SubtitleDownloader.SubtitleResult>>(emptyList()) }
-
-            LaunchedEffect(Unit) {
-                isSearching = true
-                searchResults = com.example.subtitles.SubtitleDownloader.searchSubtitles(currentMedia?.name ?: "video")
-                isSearching = false
-            }
-
-            LiquidGlassDialog(
-                visible = showOnlineSubtitlesDialog,
-                onDismissRequest = { showOnlineSubtitlesDialog = false },
-                title = "البحث الذكي عن الترجمات 🌐",
-                confirmButton = {
-                    TextButton(onClick = { showOnlineSubtitlesDialog = false }) {
-                        Text("إغلاق", color = Color.White)
-                    }
-                }
-            ) {
-                Text(
-                    text = "نتائج البحث لـ: ${currentMedia?.name ?: ""}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.75f)
-                )
-                if (isSearching) {
-                    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = Color(0xFF00E5FF))
-                    }
-                } else if (searchResults.isEmpty()) {
-                    Text("لم يتم العثور على ترجمات متطابقة.", color = Color(0xFFFF5252))
-                } else {
-                    searchResults.forEach { sub ->
-                        LiquidGlassContainer(
-                            shape = RoundedCornerShape(14.dp),
-                            contentPadding = PaddingValues(12.dp),
-                            onClick = {
-                                viewModel.loadSubtitleText(sub.title, sub.srtContent)
-                                Toast.makeText(context, "تم تطبيق الترجمة بنجاح! 📝", Toast.LENGTH_SHORT).show()
-                                showOnlineSubtitlesDialog = false
-                                showSubtitlesDialog = false
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Subtitles, contentDescription = null, tint = Color(0xFF00E5FF))
-                                Spacer(Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(sub.title, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                                    Spacer(Modifier.height(2.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Surface(
-                                            shape = RoundedCornerShape(4.dp),
-                                            color = Color(0xFF00E5FF).copy(alpha = 0.2f)
-                                        ) {
-                                            Text(
-                                                text = sub.language,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = Color(0xFF00E5FF),
-                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(sub.source, style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.7f))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
 
         // LIQUID GLASS DIALOG: Smart Sleep Timer with Live Countdown
