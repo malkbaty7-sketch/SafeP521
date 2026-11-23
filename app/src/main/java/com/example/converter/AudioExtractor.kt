@@ -113,7 +113,15 @@ object AudioExtractor {
                     bufferInfo.size = 0
                 } else {
                     bufferInfo.presentationTimeUs = activeExtractor.sampleTime
-                    bufferInfo.flags = activeExtractor.sampleFlags
+                    val sampleFlags = activeExtractor.sampleFlags
+                    if (sampleFlags and MediaExtractor.SAMPLE_FLAG_ENCRYPTED != 0) {
+                        throw IllegalStateException("لا يمكن استخراج عينات صوتية مشفرة دون فك تشفيرها")
+                    }
+                    bufferInfo.flags = if (sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) {
+                        MediaCodec.BUFFER_FLAG_KEY_FRAME
+                    } else {
+                        0
+                    }
                     activeMuxer.writeSampleData(muxerTrackIndex, buffer, bufferInfo)
                     activeExtractor.advance()
                     sampleCount++

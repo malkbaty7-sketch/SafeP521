@@ -1,3 +1,5 @@
+@file:kotlin.OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.example.ui.glass
 
 import android.graphics.Bitmap
