@@ -1,5 +1,6 @@
 package com.example.ui.analytics
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,6 +22,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.theme.SafeIconButton
+import com.example.ui.theme.SafeTopAppBar
 import com.example.SafePlayerApp
 import com.example.analytics.WatchAnalyticsManager
 import com.example.analytics.WatchAnalyticsSummary
@@ -40,12 +43,16 @@ fun WatchAnalyticsScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            SafeTopAppBar(
                 title = { Text("إحصائيات وسجل المشاهدة 📊", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
-                    }
+                    SafeIconButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "رجوع",
+                        onClick = onNavigateBack,
+                        size = 40.dp,
+                        iconSize = 20.dp
+                    )
                 }
             )
         }
@@ -60,6 +67,7 @@ fun WatchAnalyticsScreen(
             // Overview Hero Card
             item {
                 Card(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
@@ -183,6 +191,7 @@ fun WatchAnalyticsScreen(
             if (summary.mostRecentPlayed.isEmpty()) {
                 item {
                     Card(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                     ) {
@@ -197,6 +206,7 @@ fun WatchAnalyticsScreen(
             } else {
                 items(summary.mostRecentPlayed) { media ->
                     Card(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                         onClick = { onPlayMedia(media.id) },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
@@ -239,6 +249,7 @@ fun MetricBox(
     modifier: Modifier = Modifier
 ) {
     Card(
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
         modifier = modifier,
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))

@@ -1,5 +1,6 @@
 package com.example.ui.editing
 
+import androidx.compose.foundation.BorderStroke
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.foundation.background
@@ -25,6 +26,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.ui.PlayerView
+import com.example.ui.theme.SafeIconButton
+import com.example.ui.theme.SafeTopAppBar
 import com.example.SafePlayerApp
 import com.example.data.EditingOperation
 import kotlinx.coroutines.delay
@@ -101,7 +104,7 @@ fun EditingScreen(
             val canUndo by viewModel.canUndo.collectAsState()
             val canRedo by viewModel.canRedo.collectAsState()
             
-            TopAppBar(
+            SafeTopAppBar(
                 title = { 
                     Column {
                         Text(project?.name ?: "Editing Studio", style = MaterialTheme.typography.titleMedium)
@@ -109,9 +112,13 @@ fun EditingScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
-                    }
+                    SafeIconButton(
+                        icon = Icons.Default.Close,
+                        contentDescription = "Close",
+                        onClick = onNavigateBack,
+                        size = 40.dp,
+                        iconSize = 20.dp
+                    )
                 },
                 actions = {
                     IconButton(onClick = { viewModel.undo() }, enabled = canUndo) {
@@ -322,6 +329,7 @@ fun EditingScreen(
                     
                     Box {
                         Button(
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                             onClick = { showCensorMenu = true },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
@@ -364,17 +372,23 @@ fun EditingScreen(
                         }
                     }
 
-                    FilledTonalButton(onClick = { 
-                        viewModel.addOperation("MUTE", currentPosition, currentPosition + 3000)
-                    }) {
+                    FilledTonalButton(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
+                        onClick = {
+                            viewModel.addOperation("MUTE", currentPosition, currentPosition + 3000)
+                        }
+                    ) {
                         Icon(Icons.Default.VolumeOff, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
                         Text("Mute")
                     }
 
-                    FilledTonalButton(onClick = { 
-                        viewModel.addOperation("DELETE", currentPosition, currentPosition + 3000)
-                    }) {
+                    FilledTonalButton(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
+                        onClick = {
+                            viewModel.addOperation("DELETE", currentPosition, currentPosition + 3000)
+                        }
+                    ) {
                         Icon(Icons.Default.ContentCut, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
                         Text("Cut")
@@ -415,6 +429,7 @@ fun EditingScreen(
                             }
 
                             Card(
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 3.dp),
@@ -609,7 +624,9 @@ fun EditingScreen(
                         }
                         
                         items(initialProps.keyframes) { kf ->
-                            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                            Card(
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(8.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,

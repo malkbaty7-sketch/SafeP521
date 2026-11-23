@@ -1,5 +1,6 @@
 package com.example.ui.settings
 
+import androidx.compose.foundation.BorderStroke
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -20,6 +21,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.theme.SafeCard
+import com.example.ui.theme.SafeIconButton
+import com.example.ui.theme.SafeTopAppBar
 import com.example.R
 import com.example.SafePlayerApp
 import com.example.util.LanguageManager
@@ -56,12 +60,16 @@ fun SettingsScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            SafeTopAppBar(
                 title = { Text(stringResource(R.string.title_settings_system), fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.desc_back))
-                    }
+                    SafeIconButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.desc_back),
+                        onClick = onNavigateBack,
+                        size = 40.dp,
+                        iconSize = 20.dp
+                    )
                 }
             )
         }
@@ -75,9 +83,9 @@ fun SettingsScreen(
         ) {
             // System Diagnostics Header Card
             item {
-                Card(
+                SafeCard(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
                 ) {
                     Column(Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -100,6 +108,7 @@ fun SettingsScreen(
 
                         Spacer(Modifier.height(12.dp))
                         Button(
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                             onClick = {
                                 scope.launch {
                                     val filePath = exportSafeDiagnostics(context, app)
@@ -129,6 +138,7 @@ fun SettingsScreen(
 
             item {
                 Card(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
@@ -151,6 +161,7 @@ fun SettingsScreen(
                 var showThemeDialog by remember { mutableStateOf(false) }
 
                 Card(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
@@ -220,6 +231,7 @@ fun SettingsScreen(
 
             item {
                 Card(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
@@ -297,6 +309,7 @@ fun SettingsScreen(
 
             item {
                 Card(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
@@ -395,6 +408,7 @@ fun SettingsScreen(
             },
             confirmButton = {
                 Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                     onClick = {
                         val emailIntent = Intent(Intent.ACTION_SEND).apply {
                             type = "message/rfc822"

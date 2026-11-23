@@ -2,7 +2,9 @@ package com.example.ui
 
 import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -30,6 +32,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.request.videoFrameMillis
+import com.example.ui.theme.SafeIconButton
+import com.example.ui.theme.SafeTopAppBar
 import com.example.R
 import com.example.data.MediaItem
 import com.example.data.MediaType
@@ -96,7 +100,7 @@ fun LibraryScreen(
     Scaffold(
         topBar = {
             if (isSearchActive) {
-                TopAppBar(
+                SafeTopAppBar(
                     title = {
                         OutlinedTextField(
                             value = searchQuery,
@@ -118,16 +122,20 @@ fun LibraryScreen(
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = { 
-                            isSearchActive = false
-                            searchQuery = ""
-                        }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "إغلاق البحث")
-                        }
+                        SafeIconButton(
+                            icon = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "إغلاق البحث",
+                            onClick = {
+                                isSearchActive = false
+                                searchQuery = ""
+                            },
+                            size = 40.dp,
+                            iconSize = 20.dp
+                        )
                     }
                 )
             } else {
-                TopAppBar(
+                SafeTopAppBar(
                     title = { 
                         Text(
                             text = if (mediaType == MediaType.VIDEO) "مكتبة الفيديوهات (${items.size})" else "مكتبة الصوتيات (${items.size})",
@@ -135,29 +143,44 @@ fun LibraryScreen(
                         ) 
                     },
                     navigationIcon = {
-                        IconButton(onClick = onNavigateBack) { 
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع") 
-                        }
+                        SafeIconButton(
+                            icon = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "رجوع",
+                            onClick = onNavigateBack,
+                            size = 40.dp,
+                            iconSize = 20.dp,
+                            shape = RoundedCornerShape(50)
+                        )
                     },
                     actions = {
                         // Search Button
-                        IconButton(onClick = { isSearchActive = true }) {
-                            Icon(Icons.Default.Search, contentDescription = "بحث")
-                        }
+                        SafeIconButton(
+                            icon = Icons.Default.Search,
+                            contentDescription = "بحث",
+                            onClick = { isSearchActive = true },
+                            size = 40.dp,
+                            iconSize = 20.dp
+                        )
 
                         // Grid / List Toggle
-                        IconButton(onClick = { isGridView = !isGridView }) {
-                            Icon(
-                                imageVector = if (isGridView) Icons.Default.ViewList else Icons.Default.GridView,
-                                contentDescription = if (isGridView) "عرض كقائمة" else "عرض كشبكة"
-                            )
-                        }
+                        SafeIconButton(
+                            icon = if (isGridView) Icons.Default.ViewList else Icons.Default.GridView,
+                            contentDescription = if (isGridView) "عرض كقائمة" else "عرض كشبكة",
+                            onClick = { isGridView = !isGridView },
+                            selected = isGridView,
+                            size = 40.dp,
+                            iconSize = 19.dp
+                        )
 
                         // Sort Menu
                         Box {
-                            IconButton(onClick = { sortMenuExpanded = true }) {
-                                Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "ترتيب")
-                            }
+                            SafeIconButton(
+                                icon = Icons.AutoMirrored.Filled.Sort,
+                                contentDescription = "ترتيب",
+                                onClick = { sortMenuExpanded = true },
+                                size = 40.dp,
+                                iconSize = 19.dp
+                            )
                             DropdownMenu(expanded = sortMenuExpanded, onDismissRequest = { sortMenuExpanded = false }) {
                                 DropdownMenuItem(
                                     text = { Text("الأحدث أولاً (تاريخ التعديل)") },
@@ -180,7 +203,7 @@ fun LibraryScreen(
                                     onClick = { sortMode = "DURATION"; sortMenuExpanded = false }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("المضاف حديثاً 🆕") },
+                                    text = { Text("المضاف حديثاً") },
                                     leadingIcon = { Icon(Icons.Default.FiberNew, contentDescription = null) },
                                     onClick = { sortMode = "NEW"; sortMenuExpanded = false }
                                 )
@@ -206,28 +229,68 @@ fun LibraryScreen(
             ) {
                 FilterChip(
                     selected = filterMode == "ALL",
+                    modifier = Modifier.border(
+                        1.dp,
+                        if (filterMode == "ALL") MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.9f),
+                        RoundedCornerShape(50)
+                    ),
+                    shape = RoundedCornerShape(50),
                     onClick = { filterMode = "ALL" },
+                    leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(16.dp)) },
                     label = { Text("الكل (${allItems.size})") }
                 )
                 FilterChip(
                     selected = filterMode == "IN_PROGRESS",
+                    modifier = Modifier.border(
+                        1.dp,
+                        if (filterMode == "IN_PROGRESS") MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.9f),
+                        RoundedCornerShape(50)
+                    ),
+                    shape = RoundedCornerShape(50),
                     onClick = { filterMode = "IN_PROGRESS" },
-                    label = { Text("قيد المشاهدة ⏳") }
+                    leadingIcon = { Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    label = { Text("قيد المشاهدة") }
                 )
                 FilterChip(
                     selected = filterMode == "FAVORITES",
+                    modifier = Modifier.border(
+                        1.dp,
+                        if (filterMode == "FAVORITES") MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.9f),
+                        RoundedCornerShape(50)
+                    ),
+                    shape = RoundedCornerShape(50),
                     onClick = { filterMode = "FAVORITES" },
-                    label = { Text("المفضلة ⭐") }
+                    leadingIcon = { Icon(Icons.Default.FavoriteBorder, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    label = { Text("المفضلة") }
                 )
                 FilterChip(
                     selected = filterMode == "UNWATCHED",
+                    modifier = Modifier.border(
+                        1.dp,
+                        if (filterMode == "UNWATCHED") MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.9f),
+                        RoundedCornerShape(50)
+                    ),
+                    shape = RoundedCornerShape(50),
                     onClick = { filterMode = "UNWATCHED" },
-                    label = { Text("غير المشاهدة 👁️") }
+                    leadingIcon = { Icon(Icons.Default.VisibilityOff, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    label = { Text("غير المشاهدة") }
                 )
                 FilterChip(
                     selected = filterMode == "WATCHED",
+                    modifier = Modifier.border(
+                        1.dp,
+                        if (filterMode == "WATCHED") MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.9f),
+                        RoundedCornerShape(50)
+                    ),
+                    shape = RoundedCornerShape(50),
                     onClick = { filterMode = "WATCHED" },
-                    label = { Text("مكتمل المشاهدة ✅") }
+                    leadingIcon = { Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    label = { Text("مكتمل المشاهدة") }
                 )
             }
 
@@ -306,9 +369,10 @@ fun LibraryGridCard(
     val context = LocalContext.current
     Card(
         modifier = modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.86f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.86f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
     ) {
         Column {
             Box(
@@ -411,8 +475,9 @@ fun LibraryItemRow(media: MediaItem, onClick: () -> Unit) {
             .padding(horizontal = 16.dp)
             .clickable { onClick() },
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        shape = RoundedCornerShape(12.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.82f)),
+        shape = RoundedCornerShape(16.dp)
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -480,14 +545,14 @@ fun LibraryItemRow(media: MediaItem, onClick: () -> Unit) {
                 )
                 if (media.watchedState == WatchedState.IN_PROGRESS) {
                     Text(
-                        text = "قيد المشاهدة ⏳",
+                        text = "قيد المشاهدة",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold
                     )
                 } else if (media.watchedState == WatchedState.WATCHED) {
                     Text(
-                        text = "تمت المشاهدة ✅",
+                        text = "تمت المشاهدة",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF4CAF50),
                         fontWeight = FontWeight.Bold

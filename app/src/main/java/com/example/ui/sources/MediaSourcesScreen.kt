@@ -1,5 +1,6 @@
 package com.example.ui.sources
 
+import androidx.compose.foundation.BorderStroke
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -19,6 +21,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.theme.SafeIconButton
+import com.example.ui.theme.SafeTopAppBar
 import com.example.SafePlayerApp
 import com.example.data.MediaFileSupport
 import com.example.data.MediaSource
@@ -94,12 +98,16 @@ fun MediaSourcesScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            SafeTopAppBar(
                 title = { Text("Media Folders & Sources", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                    }
+                    SafeIconButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        onClick = onNavigateBack,
+                        size = 40.dp,
+                        iconSize = 20.dp
+                    )
                 },
                 actions = {
                     IconButton(onClick = {
@@ -131,6 +139,7 @@ fun MediaSourcesScreen(
         ) {
             item {
                 Card(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
@@ -163,6 +172,7 @@ fun MediaSourcesScreen(
             } else if (visibleSources.isEmpty()) {
                 item {
                     Card(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
@@ -180,6 +190,7 @@ fun MediaSourcesScreen(
             } else {
                 items(visibleSources) { source ->
                     Card(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {

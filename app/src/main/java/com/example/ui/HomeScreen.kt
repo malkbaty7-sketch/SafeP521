@@ -6,6 +6,7 @@ import android.text.format.Formatter
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,6 +40,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.request.videoFrameMillis
+import com.example.ui.theme.SafeIconButton
+import com.example.ui.theme.SafeTopAppBar
 import com.example.R
 import com.example.data.MediaItem
 import com.example.data.MediaType
@@ -158,7 +161,7 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             if (isSearchActive) {
-                TopAppBar(
+                SafeTopAppBar(
                     title = {
                         OutlinedTextField(
                             value = searchQuery,
@@ -180,16 +183,20 @@ fun HomeScreen(
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = {
-                            isSearchActive = false
-                            searchQuery = ""
-                        }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "إغلاق البحث")
-                        }
+                        SafeIconButton(
+                            icon = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "إغلاق البحث",
+                            onClick = {
+                                isSearchActive = false
+                                searchQuery = ""
+                            },
+                            size = 40.dp,
+                            iconSize = 20.dp
+                        )
                     }
                 )
             } else {
-                TopAppBar(
+                SafeTopAppBar(
                     title = {
                         Text(
                             text = if (selectedFolder != null) {
@@ -210,39 +217,55 @@ fun HomeScreen(
                     },
                     navigationIcon = {
                         if (selectedFolder != null) {
-                            IconButton(onClick = { selectedFolder = null }) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "رجوع"
-                                )
-                            }
+                            SafeIconButton(
+                                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "رجوع",
+                                onClick = { selectedFolder = null },
+                                size = 40.dp,
+                                iconSize = 20.dp,
+                                shape = CircleShape
+                            )
                         }
                     },
                     actions = {
                         // Grid / List Toggle Button
-                        IconButton(onClick = { isGridView = !isGridView }) {
-                            Icon(
-                                imageVector = if (isGridView) Icons.Default.ViewList else Icons.Default.GridView,
-                                contentDescription = if (isGridView) "عرض كقائمة" else "عرض كشبكة",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
+                        SafeIconButton(
+                            icon = if (isGridView) Icons.Default.ViewList else Icons.Default.GridView,
+                            contentDescription = if (isGridView) "عرض كقائمة" else "عرض كشبكة",
+                            onClick = { isGridView = !isGridView },
+                            selected = isGridView,
+                            size = 40.dp,
+                            iconSize = 19.dp
+                        )
 
                         // Search Button
-                        IconButton(onClick = { isSearchActive = true }) {
-                            Icon(Icons.Default.Search, contentDescription = "بحث")
-                        }
+                        SafeIconButton(
+                            icon = Icons.Default.Search,
+                            contentDescription = "بحث",
+                            onClick = { isSearchActive = true },
+                            size = 40.dp,
+                            iconSize = 20.dp
+                        )
 
                         // Security Vault Button
-                        IconButton(onClick = onNavigateToSecurity) {
-                            Icon(Icons.Default.Security, contentDescription = "الخزنة السرية", tint = MaterialTheme.colorScheme.primary)
-                        }
+                        SafeIconButton(
+                            icon = Icons.Default.Security,
+                            contentDescription = "الخزنة السرية",
+                            onClick = onNavigateToSecurity,
+                            size = 40.dp,
+                            iconSize = 19.dp,
+                            iconTint = MaterialTheme.colorScheme.primary
+                        )
 
                         // More options
                         Box {
-                            IconButton(onClick = { showMoreMenu = true }) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "خيارات إضافية")
-                            }
+                            SafeIconButton(
+                                icon = Icons.Default.MoreVert,
+                                contentDescription = "خيارات إضافية",
+                                onClick = { showMoreMenu = true },
+                                size = 40.dp,
+                                iconSize = 20.dp
+                            )
                             DropdownMenu(
                                 expanded = showMoreMenu,
                                 onDismissRequest = { showMoreMenu = false }
@@ -274,7 +297,7 @@ fun HomeScreen(
                                     leadingIcon = { Icon(Icons.Default.TaskAlt, contentDescription = null) }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("بث IPTV والروابط المباشرة 📡") },
+                                    text = { Text("بث IPTV والروابط المباشرة") },
                                     onClick = { 
                                         showMoreMenu = false
                                         onNavigateToIptv() 
@@ -282,7 +305,7 @@ fun HomeScreen(
                                     leadingIcon = { Icon(Icons.Default.LiveTv, contentDescription = null) }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("المشاركة والنقل عبر Wi-Fi 💻") },
+                                    text = { Text("المشاركة والنقل عبر Wi-Fi") },
                                     onClick = { 
                                         showMoreMenu = false
                                         onNavigateToWifiShare() 
@@ -290,7 +313,7 @@ fun HomeScreen(
                                     leadingIcon = { Icon(Icons.Default.Wifi, contentDescription = null) }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("إحصائيات وسجل المشاهدة 📊") },
+                                    text = { Text("إحصائيات وسجل المشاهدة") },
                                     onClick = { 
                                         showMoreMenu = false
                                         onNavigateToAnalytics() 
@@ -326,31 +349,41 @@ fun HomeScreen(
                         onOpenPlayer = { onNavigateToPlayer(activePlayingMedia) }
                     )
                 }
-                NavigationBar {
-                    NavigationBarItem(
-                        selected = currentTab == 0,
-                        onClick = { currentTab = 0 },
-                        icon = { Icon(Icons.Default.VideoLibrary, contentDescription = stringResource(R.string.tab_video)) },
-                        label = { Text(stringResource(R.string.tab_video)) }
-                    )
-                    NavigationBarItem(
-                        selected = currentTab == 1,
-                        onClick = { currentTab = 1 },
-                        icon = { Icon(Icons.Default.MusicNote, contentDescription = stringResource(R.string.tab_music)) },
-                        label = { Text(stringResource(R.string.tab_music)) }
-                    )
-                    NavigationBarItem(
-                        selected = currentTab == 2,
-                        onClick = { currentTab = 2 },
-                        icon = { Icon(Icons.Default.FolderSpecial, contentDescription = stringResource(R.string.tab_my_files)) },
-                        label = { Text(stringResource(R.string.tab_my_files)) }
-                    )
-                    NavigationBarItem(
-                        selected = currentTab == 3,
-                        onClick = { currentTab = 3 },
-                        icon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, contentDescription = stringResource(R.string.tab_playlist)) },
-                        label = { Text(stringResource(R.string.tab_playlist)) }
-                    )
+                Surface(
+                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)),
+                    tonalElevation = 4.dp
+                ) {
+                    NavigationBar(
+                        containerColor = Color.Transparent,
+                        tonalElevation = 0.dp
+                    ) {
+                        NavigationBarItem(
+                            selected = currentTab == 0,
+                            onClick = { currentTab = 0 },
+                            icon = { Icon(Icons.Default.VideoLibrary, contentDescription = stringResource(R.string.tab_video)) },
+                            label = { Text(stringResource(R.string.tab_video)) }
+                        )
+                        NavigationBarItem(
+                            selected = currentTab == 1,
+                            onClick = { currentTab = 1 },
+                            icon = { Icon(Icons.Default.MusicNote, contentDescription = stringResource(R.string.tab_music)) },
+                            label = { Text(stringResource(R.string.tab_music)) }
+                        )
+                        NavigationBarItem(
+                            selected = currentTab == 2,
+                            onClick = { currentTab = 2 },
+                            icon = { Icon(Icons.Default.FolderSpecial, contentDescription = stringResource(R.string.tab_my_files)) },
+                            label = { Text(stringResource(R.string.tab_my_files)) }
+                        )
+                        NavigationBarItem(
+                            selected = currentTab == 3,
+                            onClick = { currentTab = 3 },
+                            icon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, contentDescription = stringResource(R.string.tab_playlist)) },
+                            label = { Text(stringResource(R.string.tab_playlist)) }
+                        )
+                    }
                 }
             }
         }
@@ -360,7 +393,10 @@ fun HomeScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(stringResource(R.string.prompt_permissions_required))
                     Spacer(Modifier.height(8.dp))
-                    Button(onClick = { permissionState.launchMultiplePermissionRequest() }) {
+                    Button(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                        onClick = { permissionState.launchMultiplePermissionRequest() }
+                        ) {
                         Text(stringResource(R.string.action_grant_access))
                     }
                 }
@@ -379,6 +415,7 @@ fun HomeScreen(
             if (scanProgress.isScanning) {
                 item {
                     Card(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                         modifier = Modifier.padding(16.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
                     ) {
@@ -581,7 +618,10 @@ fun HomeScreen(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(stringResource(R.string.empty_media), style = MaterialTheme.typography.titleMedium)
                             Spacer(Modifier.height(8.dp))
-                            Button(onClick = { viewModel.startScan() }) {
+                            Button(
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                                onClick = { viewModel.startScan() }
+                                ) {
                                 Text(stringResource(R.string.action_scan_device))
                             }
                         }
@@ -598,8 +638,9 @@ fun HomeScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 6.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.62f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.82f))
                     ) {
                         Row(
                             modifier = Modifier
@@ -608,19 +649,44 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                Text("🎬 $videoMediaCount فيديو", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                                Text("🎵 $audioMediaCount مقطع صوتي", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                            }
-                            Text(
-                                text = "تصفح الكل ←",
-                                color = MaterialTheme.colorScheme.primary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.clickable {
-                                    onNavigateToLibrary(if (currentTab == 1) MediaType.AUDIO else MediaType.VIDEO)
+                            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.VideoLibrary,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("$videoMediaCount فيديو", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                                 }
-                            )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.MusicNote,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("$audioMediaCount صوت", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                }
+                            }
+                            Surface(
+                                onClick = {
+                                    onNavigateToLibrary(if (currentTab == 1) MediaType.AUDIO else MediaType.VIDEO)
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.78f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.42f))
+                            ) {
+                                Text(
+                                    text = "تصفح الكل",
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -636,8 +702,9 @@ fun HomeScreen(
                         Surface(
                             onClick = onNavigateToIptv,
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.42f))
                         ) {
                             Row(
                                 modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
@@ -653,8 +720,9 @@ fun HomeScreen(
                         Surface(
                             onClick = onNavigateToWifiShare,
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f)
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.42f))
                         ) {
                             Row(
                                 modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
@@ -670,8 +738,9 @@ fun HomeScreen(
                         Surface(
                             onClick = onNavigateToAnalytics,
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.65f)
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.42f))
                         ) {
                             Row(
                                 modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
@@ -697,11 +766,20 @@ fun HomeScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "متابعة المشاهدة ⏳",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayCircleOutline,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = "متابعة المشاهدة",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                                 Text(
                                     text = "${continueWatching.size} مقاطع",
                                     style = MaterialTheme.typography.labelSmall,
@@ -736,23 +814,55 @@ fun HomeScreen(
                     ) {
                         FilterChip(
                             selected = activeFilterChip == "ALL",
+                            modifier = Modifier.border(
+                                1.dp,
+                                if (activeFilterChip == "ALL") MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.9f),
+                                RoundedCornerShape(50)
+                            ),
+                            shape = RoundedCornerShape(50),
                             onClick = { activeFilterChip = "ALL" },
+                            leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(16.dp)) },
                             label = { Text("المجلدات والكل") }
                         )
                         FilterChip(
                             selected = activeFilterChip == "FAVORITES",
+                            modifier = Modifier.border(
+                                1.dp,
+                                if (activeFilterChip == "FAVORITES") MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.9f),
+                                RoundedCornerShape(50)
+                            ),
+                            shape = RoundedCornerShape(50),
                             onClick = { activeFilterChip = "FAVORITES" },
-                            label = { Text("المفضلة ⭐ (${favorites.size})") }
+                            leadingIcon = { Icon(Icons.Default.FavoriteBorder, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                            label = { Text("المفضلة (${favorites.size})") }
                         )
                         FilterChip(
                             selected = activeFilterChip == "NEW",
+                            modifier = Modifier.border(
+                                1.dp,
+                                if (activeFilterChip == "NEW") MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.9f),
+                                RoundedCornerShape(50)
+                            ),
+                            shape = RoundedCornerShape(50),
                             onClick = { activeFilterChip = "NEW" },
-                            label = { Text("المضاف حديثاً 🆕") }
+                            leadingIcon = { Icon(Icons.Default.FiberNew, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                            label = { Text("المضاف حديثاً") }
                         )
                         FilterChip(
                             selected = activeFilterChip == "IN_PROGRESS",
+                            modifier = Modifier.border(
+                                1.dp,
+                                if (activeFilterChip == "IN_PROGRESS") MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.9f),
+                                RoundedCornerShape(50)
+                            ),
+                            shape = RoundedCornerShape(50),
                             onClick = { activeFilterChip = "IN_PROGRESS" },
-                            label = { Text("قيد المشاهدة ⏳ (${continueWatching.size})") }
+                            leadingIcon = { Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                            label = { Text("قيد المشاهدة (${continueWatching.size})") }
                         )
                     }
                 }
@@ -1094,7 +1204,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.renderMediaListOrGrid
     }
 }
 
-// 🌟 Hero Continue Watching Card (بطاقة متابعة المشاهدة البانورامية)
+// Hero Continue Watching Card: cinematic thumbnail with persistent progress.
 @Composable
 fun HeroContinueWatchingCard(
     media: MediaItem,
@@ -1108,10 +1218,10 @@ fun HeroContinueWatchingCard(
         modifier = Modifier
             .width(260.dp)
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.82f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
     ) {
         Column {
             Box(
@@ -1258,7 +1368,7 @@ fun HeroContinueWatchingCard(
     }
 }
 
-// 🌟 2-Column Responsive Media Grid Card (بطاقة الشبكة العصرية)
+// Two-column media grid card with a crisp, theme-aware outline.
 @Composable
 fun HomeMediaGridCard(
     media: MediaItem,
@@ -1269,10 +1379,10 @@ fun HomeMediaGridCard(
     val context = LocalContext.current
     Card(
         modifier = modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.86f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.88f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
     ) {
         Column {
             Box(
@@ -1399,41 +1509,65 @@ fun FolderListItem(
     isRecent: Boolean = false,
     onClick: () -> Unit
 ) {
-    Row(
+    Surface(
+        onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 16.dp, vertical = 5.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.48f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
     ) {
-        Icon(
-            imageVector = if (isRecent) Icons.Default.Schedule else Icons.Default.Folder,
-            contentDescription = "Folder",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(32.dp)
-        )
-        
-        Spacer(modifier = Modifier.width(16.dp))
-        
-        Text(
-            text = title,
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        
-        Spacer(modifier = Modifier.width(8.dp))
-        
-        Text(
-            text = countText ?: count.toString(),
-            style = MaterialTheme.typography.bodyMedium,
-            color = countColor
-        )
-        
-        Spacer(modifier = Modifier.weight(1f))
-        
-        IconButton(onClick = { /* More options */ }, modifier = Modifier.size(24.dp)) {
-            Icon(Icons.Default.MoreVert, contentDescription = "Options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (isRecent) Icons.Default.Schedule else Icons.Default.Folder,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = title,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f))
+            ) {
+                Text(
+                    text = countText ?: count.toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = countColor,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                )
+            }
+            Spacer(Modifier.width(4.dp))
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp)
+            )
         }
     }
 }
@@ -1446,14 +1580,18 @@ fun HomeMediaItemRow(
 ) {
     val context = LocalContext.current
     Surface(
+        onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 6.dp),
-        color = Color.Transparent
+            .padding(horizontal = 16.dp, vertical = 5.dp),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.58f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.78f))
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Media thumbnail / icon
@@ -1562,8 +1700,9 @@ fun FloatingMiniPlayerBar(
             .padding(horizontal = 12.dp, vertical = 6.dp)
             .clickable(onClick = onOpenPlayer),
         shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceColorAtElevation(10.dp),
-        shadowElevation = 8.dp
+        color = MaterialTheme.colorScheme.surfaceColorAtElevation(8.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.9f)),
+        shadowElevation = 6.dp
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(

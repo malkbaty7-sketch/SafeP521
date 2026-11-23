@@ -1,5 +1,6 @@
 package com.example.ui.security
 
+import androidx.compose.foundation.BorderStroke
 import android.text.format.Formatter
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -27,6 +28,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.theme.SafeIconButton
+import com.example.ui.theme.SafeTopAppBar
 import com.example.SafePlayerApp
 import com.example.data.MediaItem
 import com.example.data.MediaType
@@ -77,12 +80,16 @@ fun SecurityScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            SafeTopAppBar(
                 title = { Text("الخزنة السرية والحماية 🔐", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع")
-                    }
+                    SafeIconButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "رجوع",
+                        onClick = onNavigateBack,
+                        size = 40.dp,
+                        iconSize = 20.dp
+                    )
                 },
                 actions = {
                     if (isVaultUnlocked) {
@@ -130,6 +137,7 @@ fun SecurityScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Card(
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(24.dp),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -193,6 +201,7 @@ fun SecurityScreen(
                                 ) {
                                     if (config?.isBiometricEnabled == true) {
                                         FilledTonalButton(
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
                                             onClick = {
                                                 val activity = context.findFragmentActivity()
                                                 if (activity == null) {
@@ -220,6 +229,7 @@ fun SecurityScreen(
                                     }
 
                                     Button(
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                                         onClick = {
                                             scope.launch {
                                                 val res = securityManager.verifyVaultOrAppPin(vaultPinInput)
@@ -255,6 +265,7 @@ fun SecurityScreen(
                     ) {
                         if (config?.isAppLockEnabled != true) {
                             Card(
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
@@ -267,7 +278,10 @@ fun SecurityScreen(
                                         Text("الخزنة غير محمية برمز PIN بعد!", fontWeight = FontWeight.Bold)
                                         Text("قم بتعيين رمز PIN وتفعيل البصمة لحماية ملفاتك المخفية", style = MaterialTheme.typography.bodySmall)
                                     }
-                                    Button(onClick = { showPinSetupDialog = true }) {
+                                    Button(
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                                        onClick = { showPinSetupDialog = true }
+                                        ) {
                                         Text("تعيين PIN")
                                     }
                                 }
@@ -285,7 +299,10 @@ fun SecurityScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             if (!isDecoyModeActive) {
-                                Button(onClick = { showAddMediaToVaultSheet = true }) {
+                                Button(
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                                    onClick = { showAddMediaToVaultSheet = true }
+                                    ) {
                                     Icon(Icons.Default.AddModerator, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(6.dp))
                                     Text("إخفاء ملفات في الخزنة")
@@ -356,6 +373,7 @@ fun SecurityScreen(
                     // Section 1: App & Vault Lock + Biometrics + Decoy PIN
                     item {
                         Card(
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                         ) {
@@ -429,7 +447,10 @@ fun SecurityScreen(
                                                 color = if (isDecoyConfigured) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
-                                        FilledTonalButton(onClick = { showDecoyPinDialog = true }) {
+                                        FilledTonalButton(
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
+                                            onClick = { showDecoyPinDialog = true }
+                                        ) {
                                             Text(if (isDecoyConfigured) "تعديل" else "إعداد")
                                         }
                                     }
@@ -439,6 +460,7 @@ fun SecurityScreen(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         Button(
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                                             onClick = { showPinSetupDialog = true },
                                             modifier = Modifier.weight(1f)
                                         ) {
@@ -465,6 +487,7 @@ fun SecurityScreen(
                     // Section 2: Screen Capture Protection (FLAG_SECURE)
                     item {
                         Card(
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                         ) {
@@ -498,6 +521,7 @@ fun SecurityScreen(
                     // Section 3: Parental Controls
                     item {
                         Card(
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                         ) {
@@ -545,7 +569,10 @@ fun SecurityScreen(
                                                 Text("تفعيل القفل الأبوي")
                                             }
                                         } else {
-                                            FilledTonalButton(onClick = { showParentAuthDialog = true }) {
+                                            FilledTonalButton(
+                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
+                                                onClick = { showParentAuthDialog = true }
+                                            ) {
                                                 Text("إدخال رمز الوالدين")
                                             }
                                         }
@@ -617,6 +644,7 @@ fun SecurityScreen(
                     ) {
                         items(unprotectedItems, key = { it.id }) { item ->
                             Card(
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
@@ -677,7 +705,9 @@ fun SecurityScreen(
                 }
             },
             confirmButton = {
-                Button(onClick = {
+                Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                    onClick = {
                     scope.launch {
                         val disabled = securityManager.disableAppLock(currentPin)
                         if (disabled) {
@@ -721,7 +751,9 @@ fun SecurityScreen(
                 }
             },
             confirmButton = {
-                Button(onClick = {
+                Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                    onClick = {
                     scope.launch {
                         val disabled = securityManager.disableParentalControl(parentPin)
                         if (disabled) {
@@ -788,7 +820,9 @@ fun SecurityScreen(
                 }
             },
             confirmButton = {
-                Button(onClick = {
+                Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                    onClick = {
                     if (pin.length < 4) {
                         error = "يجب أن يتكون الرمز من 4 أرقام على الأقل"
                     } else if (pin != confirmPin) {
@@ -857,7 +891,9 @@ fun SecurityScreen(
                 }
             },
             confirmButton = {
-                Button(onClick = {
+                Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                    onClick = {
                     if (decoyPin.length < 4) {
                         error = "يجب أن يتكون رمز التمويه من 4 أرقام على الأقل"
                     } else {
@@ -953,7 +989,9 @@ fun SecurityScreen(
                 }
             },
             confirmButton = {
-                Button(onClick = {
+                Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                    onClick = {
                     if (parentPin.length < 4) {
                         error = "يجب أن يتكون الرمز من 4 أرقام على الأقل"
                     } else {
@@ -1014,7 +1052,9 @@ fun SecurityScreen(
                 }
             },
             confirmButton = {
-                Button(onClick = {
+                Button(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
+                    onClick = {
                     scope.launch {
                         val ok = securityManager.verifyParentPin(enteredPin)
                         if (ok) {
@@ -1044,6 +1084,7 @@ private fun VaultMediaCard(
 ) {
     val context = LocalContext.current
     Card(
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onPlay),
@@ -1096,6 +1137,7 @@ private fun VaultMediaCard(
 private fun AuditLogItem(log: SecurityAuditLog) {
     val dateFormat = remember { SimpleDateFormat("MMM dd, HH:mm:ss", Locale.getDefault()) }
     Card(
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {

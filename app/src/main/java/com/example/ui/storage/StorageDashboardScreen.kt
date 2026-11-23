@@ -1,5 +1,6 @@
 package com.example.ui.storage
 
+import androidx.compose.foundation.BorderStroke
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -7,7 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Warning
@@ -16,6 +17,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import com.example.ui.theme.SafeIconButton
+import com.example.ui.theme.SafeTopAppBar
 import com.example.R
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -90,12 +93,16 @@ fun StorageDashboardScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            SafeTopAppBar(
                 title = { Text("Storage Manager", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                    }
+                    SafeIconButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        onClick = onNavigateBack,
+                        size = 40.dp,
+                        iconSize = 20.dp
+                    )
                 },
                 actions = {
                     IconButton(onClick = {
@@ -119,6 +126,7 @@ fun StorageDashboardScreen(
         ) {
             item {
                 Card(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -136,6 +144,7 @@ fun StorageDashboardScreen(
 
             items(storageLocations) { location ->
                 Card(
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                     shape = MaterialTheme.shapes.medium
@@ -187,6 +196,7 @@ fun StorageDashboardScreen(
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                         onClick = {
                             scope.launch {
                                 val result = app.storageManager.clearCacheDetailed("THUMBNAILS")
@@ -232,6 +242,7 @@ fun StorageDashboardScreen(
 
                 items(missingMediaItems) { missingItem ->
                     Card(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f))
                     ) {
@@ -249,6 +260,7 @@ fun StorageDashboardScreen(
                             }
                             Spacer(Modifier.width(8.dp))
                             FilledTonalButton(
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
                                 onClick = {
                                     relinkingMediaItem = missingItem
                                     relinkLauncher.launch(
