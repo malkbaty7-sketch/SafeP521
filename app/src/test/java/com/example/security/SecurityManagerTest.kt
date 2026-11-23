@@ -21,7 +21,7 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [35])
 @OptIn(ExperimentalCoroutinesApi::class)
 class SecurityManagerTest {
     private lateinit var context: Context

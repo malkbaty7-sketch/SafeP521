@@ -20,7 +20,7 @@ import org.robolectric.annotation.Config
 import kotlinx.coroutines.delay
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [35])
 @OptIn(ExperimentalCoroutinesApi::class)
 class SafeTaskManagerTest {
 

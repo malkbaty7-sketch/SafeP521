@@ -20,7 +20,7 @@ import java.io.File
 import java.util.UUID
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [35])
 @OptIn(ExperimentalCoroutinesApi::class)
 class StorageManagerTest {
 
