@@ -1,5 +1,6 @@
 package com.example.ui.storage
 
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -39,22 +40,46 @@ fun StorageDashboardScreen(
     var relinkingMediaItem by remember { mutableStateOf<MediaItem?>(null) }
     var showMessage by remember { mutableStateOf<String?>(null) }
 
-    val relinkLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null && relinkingMediaItem != null) {
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            } catch (_: Exception) {}
+    val relinkLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val uri = result.data?.data
+        val item = relinkingMediaItem
+        if (uri != null && item != null) {
+            val grantedModes = (result.data?.flags ?: 0) and
+                (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            val modesToPersist = grantedModes.takeIf { it != 0 } ?: Intent.FLAG_GRANT_READ_URI_PERMISSION
+            val persistedModes = runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, modesToPersist)
+                modesToPersist
+            }.getOrElse {
+                if ((grantedModes and Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0) {
+                    runCatching {
+                        context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    }.getOrDefault(0)
+                } else {
+                    0
+                }
+            }
 
-            val item = relinkingMediaItem!!
-            val newPath = uri.toString()
             scope.launch {
-                app.repository.relinkMedia(item.id, newPath)
-                showMessage = "Relinked: ${item.name}"
+                val relinkResult = app.storageManager.relinkMedia(item.id, uri.toString())
+                showMessage = relinkResult.fold(
+                    onSuccess = {
+                        val accessNote = when {
+                            persistedModes == 0 -> " Document access may not survive an app restart."
+                            (persistedModes and Intent.FLAG_GRANT_WRITE_URI_PERMISSION) == 0 ->
+                                " This provider granted read-only access; file changes may require selecting it again."
+                            else -> ""
+                        }
+                        "Relinked: ${item.name}.$accessNote"
+                    },
+                    onFailure = { "Could not relink ${item.name}: ${it.message ?: "unknown error"}" }
+                )
                 relinkingMediaItem = null
             }
+        } else {
+            if (item != null) showMessage = "No file was selected."
+            relinkingMediaItem = null
         }
     }
 
@@ -156,8 +181,6 @@ fun StorageDashboardScreen(
                 Text("Storage Maintenance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
                 
-                var showMessage by remember { mutableStateOf<String?>(null) }
-                
                 showMessage?.let { msg ->
                     Text(msg, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
                 }
@@ -166,24 +189,32 @@ fun StorageDashboardScreen(
                     Button(
                         onClick = {
                             scope.launch {
-                                val result = app.storageManager.clearCache("THUMBNAILS")
-                                showMessage = if (result.isSuccess) {
-                                    "Cleared ${formatSize(result.getOrNull() ?: 0)} from thumbnails cache."
-                                } else {
-                                    "Failed to clear cache: ${result.exceptionOrNull()?.message}"
-                                }
+                                val result = app.storageManager.clearCacheDetailed("THUMBNAILS")
+                                showMessage = result.fold(
+                                    onSuccess = { report ->
+                                        val issue = if (report.failures == 0) {
+                                            ""
+                                        } else {
+                                            " ${report.failures} file(s) or folder(s) could not be removed."
+                                        }
+                                        "Removed ${report.filesDeleted} file(s) (${formatSize(report.bytesCleared)}) from the thumbnails cache.$issue"
+                                    },
+                                    onFailure = { "Failed to clear the thumbnails cache: ${it.message ?: "unknown error"}" }
+                                )
                             }
                         },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Clear Temp/Cache")
+                        Text("Clear Thumbnails Cache")
                     }
 
                     OutlinedButton(
                         onClick = {
                             scope.launch {
                                 val stats = app.storageManager.reconcileDatabase()
-                                showMessage = "Reconciliation complete: ${stats["missing"]} missing, ${stats["orphaned"]} orphaned."
+                                val untrackedText = stats.untracked?.let { "$it untracked MediaStore item(s) visible to the app" }
+                                    ?: "untracked count unavailable (permission/provider access)"
+                                showMessage = "Reconciliation complete: ${stats.missing} missing, $untrackedText, ${stats.unverified} item(s) could not be checked."
                             }
                         },
                         modifier = Modifier.weight(1f)
@@ -220,7 +251,17 @@ fun StorageDashboardScreen(
                             FilledTonalButton(
                                 onClick = {
                                     relinkingMediaItem = missingItem
-                                    relinkLauncher.launch(arrayOf("*/*"))
+                                    relinkLauncher.launch(
+                                        Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                                            addCategory(Intent.CATEGORY_OPENABLE)
+                                            type = "*/*"
+                                            addFlags(
+                                                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                                                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                                            )
+                                        }
+                                    )
                                 }
                             ) {
                                 Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(16.dp))
