@@ -97,7 +97,10 @@ jobs:
                   for result in case:
                       if result.tag not in ("failure", "error"):
                           continue
-                      detail = compact(result.attrib.get("message") or result.text)
+                      detail = compact(result.attrib.get("message"))
+                      stack = compact(result.text, limit=1_250)
+                      if stack and stack not in detail:
+                          detail = f"{detail} | stack: {stack}" if detail else stack
                       test_failures.append(f"{case.get('classname', 'test')}#{case.get('name', 'unknown')}: {detail or result.tag}")
           emit("Unit test failures", [f"{len(test_failures)} failing test(s):", *test_failures[:12]] if test_failures else [])
 
