@@ -56,31 +56,38 @@ jobs:
           gradle :app:testDebugUnitTest :app:lintDebug --no-daemon --stacktrace 2>&1 | tee "$log_file"
           gradle_status=${PIPESTATUS[0]}
           if [[ "$gradle_status" -ne 0 ]]; then
-            mapfile -t diagnostic_lines < <(
-              {
-                grep -Ei '^(e: |error:|.*(unresolved reference|type mismatch|no value passed|cannot find|could not resolve|could not find|lint found|failing tests?|expected:|actual:))' "$log_file" | head -n 5 || true
-                grep -Ei '^(FAILURE:|.*What went wrong:|Execution failed for task|Caused by:|BUILD FAILED|.*tests? (completed|failed)|.*there were failing tests.*|> )' "$log_file" | grep -v '^> Task ' | tail -n 5 || true
-              } | awk '!seen[$0]++'
-            )
-            if [[ "${#diagnostic_lines[@]}" -eq 0 ]]; then
-              mapfile -t diagnostic_lines < <(tail -n 10 "$log_file")
-            fi
-            {
-              echo "### Gradle test/lint diagnostics"
-              echo '```text'
-              printf '%s\n' "${diagnostic_lines[@]}"
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            for line in "${diagnostic_lines[@]}"; do
-              escaped="${line//'%'/'%25'}"
-              echo "::error title=Gradle test/lint diagnostic::$escaped"
-            done
             python3 - <<'PY'
           import glob
           import os
+          import re
           import xml.etree.ElementTree as ET
+          from collections import Counter
+          from pathlib import Path
 
-          failures = []
+          def compact(value, limit=320):
+              return " ".join((value or "").split())[:limit]
+
+          def emit(title, lines):
+              if not lines:
+                  return
+              message = "\n".join(lines)
+              if len(message) > 3_500:
+                  message = message[:3_500] + "\n... (truncated)"
+              escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title={title}::{escaped}")
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                  summary.write(f"### {title}\n```text\n{message}\n```\n")
+
+          log_path = Path(os.environ["RUNNER_TEMP"]) / "unit-tests-and-lint.log"
+          log_lines = log_path.read_text(errors="replace").splitlines() if log_path.exists() else []
+          compile_errors = [line.strip() for line in log_lines if re.match(r"^(e: |error:)", line, re.IGNORECASE)]
+          build_summary = [
+              line.strip() for line in log_lines
+              if re.search(r"FAILURE:|What went wrong:|Execution failed for task|BUILD FAILED|Lint found|There were failing tests|Caused by:", line, re.IGNORECASE)
+          ]
+          emit("Gradle compilation/build diagnostics", (compile_errors[:8] + build_summary[-5:])[:12])
+
+          test_failures = []
           for report in sorted(glob.glob("app/build/test-results/testDebugUnitTest/*.xml")):
               try:
                   root = ET.parse(report).getroot()
@@ -90,19 +97,36 @@ jobs:
                   for result in case:
                       if result.tag not in ("failure", "error"):
                           continue
-                      detail = result.attrib.get("message", "").strip() or (result.text or "").strip()
-                      detail = " ".join(detail.split())[:300]
-                      failures.append(f"{case.get('classname', 'test')}#{case.get('name', 'unknown')}: {detail or result.tag}")
+                      detail = compact(result.attrib.get("message") or result.text)
+                      test_failures.append(f"{case.get('classname', 'test')}#{case.get('name', 'unknown')}: {detail or result.tag}")
+          emit("Unit test failures", [f"{len(test_failures)} failing test(s):", *test_failures[:12]] if test_failures else [])
 
-          if failures:
-              lines = [f"{len(failures)} failing unit test(s):", *failures[:15]]
-              message = "\n".join(lines)
-              if len(message) > 3_500:
-                  message = message[:3_500] + "\n... (truncated)"
-              escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-              print(f"::error title=Unit test failures::{escaped}")
-              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-                  summary.write("### Unit test failures\n```text\n" + message + "\n```\n")
+          lint_errors = []
+          seen = set()
+          for report in Path("app/build").rglob("lint-results*.xml"):
+              try:
+                  root = ET.parse(report).getroot()
+              except ET.ParseError:
+                  continue
+              for issue in root.iter("issue"):
+                  if issue.attrib.get("severity", "").lower() != "error":
+                      continue
+                  location = issue.find("location")
+                  filename = location.attrib.get("file", "unknown") if location is not None else "unknown"
+                  line = location.attrib.get("line", "?") if location is not None else "?"
+                  identifier = issue.attrib.get("id", "LintError")
+                  message = compact(issue.attrib.get("message"))
+                  entry = (identifier, filename, line, message)
+                  if entry not in seen:
+                      seen.add(entry)
+                      lint_errors.append(entry)
+          if lint_errors:
+              counts = Counter(item[0] for item in lint_errors)
+              lint_lines = [f"{len(lint_errors)} lint error(s); issue counts:"]
+              lint_lines.extend(f"{identifier}: {count}" for identifier, count in sorted(counts.items()))
+              lint_lines.append("Examples:")
+              lint_lines.extend(f"{identifier} {filename}:{line}: {message}" for identifier, filename, line, message in lint_errors[:8])
+              emit("Android lint errors", lint_lines)
           PY
           fi
           exit "$gradle_status"
