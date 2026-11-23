@@ -124,6 +124,9 @@ class MediaRepository(private val mediaDao: MediaDao) {
     
     suspend fun deleteMarker(markerId: Int) = mediaDao.deleteMarker(markerId)
 
+    suspend fun clearPendingSafetySuggestions(mediaId: Int, source: String, profileId: String) =
+        mediaDao.clearPendingSafetySuggestions(mediaId, source, profileId)
+
     // --- Editing Projects ---
     fun getProjectsForMedia(mediaId: Int): Flow<List<EditingProject>> = mediaDao.getProjectsForMedia(mediaId)
     
