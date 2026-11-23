@@ -414,6 +414,16 @@ class SecurityManager(
         return !isBlocked
     }
 
+    /** Family safety settings always require a parent authorization while parental controls are enabled. */
+    suspend fun canManageSafeWatch(): Boolean {
+        if (_isDecoyModeActive.value) return false
+        val config = securityDao.getSecurityConfig() ?: return true
+        if (config.isAppLockEnabled && !_isUnlocked.value) return false
+        if (!config.isParentalControlEnabled || _isParentAuthorized.value) return true
+        logAudit("ACTION_BLOCKED", "Blocked family safety rule change by Parental Controls")
+        return false
+    }
+
     suspend fun toggleItemProtection(itemType: String, itemId: Int): Boolean {
         if (_isDecoyModeActive.value || !canPerformAction(SecurityAction.MODIFY_SETTINGS)) return false
         val isProtected = securityDao.isItemProtected(itemType, itemId)

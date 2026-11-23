@@ -143,6 +143,9 @@ interface MediaDao {
     
     @Query("DELETE FROM timeline_markers WHERE id = :markerId")
     suspend fun deleteMarker(markerId: Int)
+
+    @Query("DELETE FROM timeline_markers WHERE mediaId = :mediaId AND type = 'SAFE_SUGGESTION' AND source = :source AND profileId = :profileId AND reviewStatus = 'PENDING'")
+    suspend fun clearPendingSafetySuggestions(mediaId: Int, source: String, profileId: String)
     
     // --- Editing Projects ---
     @Query("SELECT * FROM editing_projects WHERE mediaId = :mediaId ORDER BY updatedAt DESC")

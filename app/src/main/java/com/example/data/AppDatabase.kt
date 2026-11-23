@@ -30,7 +30,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         com.example.streaming.StreamChannel::class,
         com.example.bookmarks.VideoBookmark::class
     ], 
-    version = 13,
+    version = 14,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -183,6 +183,26 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `timeline_markers` ADD COLUMN `endTimeMs` INTEGER")
+                database.execSQL("ALTER TABLE `timeline_markers` ADD COLUMN `category` TEXT")
+                database.execSQL("ALTER TABLE `timeline_markers` ADD COLUMN `action` TEXT")
+                database.execSQL("ALTER TABLE `timeline_markers` ADD COLUMN `profileId` TEXT")
+                database.execSQL("ALTER TABLE `timeline_markers` ADD COLUMN `confidence` REAL")
+                database.execSQL("ALTER TABLE `timeline_markers` ADD COLUMN `source` TEXT")
+                database.execSQL("ALTER TABLE `timeline_markers` ADD COLUMN `reviewStatus` TEXT")
+                database.execSQL(
+                    "UPDATE `timeline_markers` SET " +
+                        "`endTimeMs` = CASE WHEN CAST(`description` AS INTEGER) > `timeMs` " +
+                        "THEN CAST(`description` AS INTEGER) ELSE `timeMs` + 5000 END, " +
+                        "`category` = 'CUSTOM', `action` = `type`, `profileId` = 'ALL', " +
+                        "`source` = 'LEGACY', `reviewStatus` = 'ACCEPTED' " +
+                        "WHERE `type` IN ('SAFE_SKIP', 'SAFE_MUTE', 'SAFE_BLUR', 'SAFE_COVER')"
+                )
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -190,7 +210,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "safeplayer_database"
                 )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                 .build()
                 INSTANCE = instance
                 instance

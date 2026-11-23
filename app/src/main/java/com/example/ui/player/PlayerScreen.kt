@@ -59,6 +59,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -68,6 +71,21 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.example.R
 import com.example.data.MediaItem
+import com.example.data.TimelineMarker
+import com.example.safety.SAFE_WATCH_ALL_PROFILES
+import com.example.safety.SafeWatchAction
+import com.example.safety.SafeWatchCategory
+import com.example.safety.SafeWatchImportPreview
+import com.example.safety.SafeWatchProfile
+import com.example.safety.SafeWatchRuleDraft
+import com.example.safety.appliesToSafetyProfile
+import com.example.safety.formatSafeWatchTime
+import com.example.safety.isSafeWatchRule
+import com.example.safety.isSafeWatchSuggestion
+import com.example.safety.isSafeWatchRelated
+import com.example.safety.parseSafeWatchTime
+import com.example.safety.safeWatchAction
+import com.example.safety.safeWatchEndTimeMs
 import com.example.ui.glass.*
 import kotlinx.coroutines.delay
 
@@ -96,6 +114,8 @@ fun PlayerScreen(
     val isNightMode by viewModel.isNightMode.collectAsState()
     val isControlsLocked by viewModel.isControlsLocked.collectAsState()
     val isSafeModeEnabled by viewModel.isSafeModeEnabled.collectAsState()
+    val activeSafeWatchProfile by viewModel.activeSafeWatchProfile.collectAsState()
+    val isSafeWatchAuthorizationRequired by viewModel.safeWatchAuthorizationRequired.collectAsState()
     val isVideoBgPlayEnabled by viewModel.isVideoBgPlayEnabled.collectAsState()
     val isOrientationLocked by viewModel.isOrientationLocked.collectAsState()
     val aspectRatioMode by viewModel.aspectRatioMode.collectAsState()
@@ -133,8 +153,16 @@ fun PlayerScreen(
 
     // Track 3: Smart Safe-Watch & Family Guard State
     val isSafeBlurActive by viewModel.isSafeBlurActive.collectAsState()
+    val isSafeCoverActive by viewModel.isSafeCoverActive.collectAsState()
     val isSafeMuteActive by viewModel.isSafeMuteActive.collectAsState()
     val safeWatchBannerMessage by viewModel.safeWatchBannerMessage.collectAsState()
+    val visibleSafeWatchRules = remember(markers, activeSafeWatchProfile) {
+        markers.filter { it.isSafeWatchRule() && it.appliesToSafetyProfile(activeSafeWatchProfile) }
+    }
+    val pendingSafetySuggestions = remember(markers, activeSafeWatchProfile) {
+        markers.filter { it.isSafeWatchSuggestion() && it.appliesToSafetyProfile(activeSafeWatchProfile) }
+    }
+    val bookmarkMarkers = remember(markers) { markers.filterNot { it.isSafeWatchRelated() } }
 
     var areControlsVisible by remember { mutableStateOf(true) }
     var userInteractedTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -156,8 +184,14 @@ fun PlayerScreen(
     var showSubtitlesDialog by remember { mutableStateOf(false) }
     var showVideoFiltersDialog by remember { mutableStateOf(false) }
     var showSafeWatchSheet by remember { mutableStateOf(false) }
+    var showSafeRuleEditor by remember { mutableStateOf(false) }
+    var safeRuleBeingEdited by remember { mutableStateOf<TimelineMarker?>(null) }
     var showImportSafeWatchDialog by remember { mutableStateOf(false) }
     var importSafeWatchJsonInput by remember { mutableStateOf("") }
+    var importSafeWatchPreview by remember { mutableStateOf<SafeWatchImportPreview?>(null) }
+    var showSafeWatchParentPinDialog by remember { mutableStateOf(false) }
+    var safeWatchParentPin by remember { mutableStateOf("") }
+    var observedSafeWatchMediaId by remember { mutableStateOf(currentMedia?.id) }
     var showSleepTimerDialog by remember { mutableStateOf(false) }
     var showSpeedDialog by remember { mutableStateOf(false) }
     var showPlaylistSheet by remember { mutableStateOf(false) }
@@ -186,8 +220,26 @@ fun PlayerScreen(
     val isAudio = currentMedia?.mediaType == com.example.data.MediaType.AUDIO
     val isVideo = currentMedia?.mediaType == com.example.data.MediaType.VIDEO
 
-    // Subtitles are only available for video playback; clear any previous video's cues on media changes.
+    LaunchedEffect(isSafeWatchAuthorizationRequired) {
+        if (isSafeWatchAuthorizationRequired) {
+            safeWatchParentPin = ""
+            showSafeWatchParentPinDialog = true
+        }
+    }
+
+    // Clear media-scoped dialogs and stale authorization requests when the playback target changes.
     LaunchedEffect(currentMedia?.id) {
+        if (observedSafeWatchMediaId != currentMedia?.id) {
+            observedSafeWatchMediaId = currentMedia?.id
+            showSafeWatchSheet = false
+            showSafeRuleEditor = false
+            safeRuleBeingEdited = null
+            showImportSafeWatchDialog = false
+            importSafeWatchPreview = null
+            importSafeWatchJsonInput = ""
+            showSafeWatchParentPinDialog = false
+            if (isSafeWatchAuthorizationRequired) viewModel.dismissSafeWatchAuthorizationRequest()
+        }
         if (!isVideo) {
             viewModel.clearSubtitles()
             showSubtitlesDialog = false
@@ -422,7 +474,7 @@ fun PlayerScreen(
                         scaleY = zoomScale
                         translationX = zoomOffset.x
                         translationY = zoomOffset.y
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isSafeBlurActive && isSafeModeEnabled) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isSafeBlurActive && !isSafeCoverActive && isSafeModeEnabled) {
                             renderEffect = android.graphics.RenderEffect.createBlurEffect(
                                 65f,
                                 65f,
@@ -480,11 +532,11 @@ fun PlayerScreen(
         }
 
         // Smart Safe-Watch Privacy Blur / Shield Overlay (Track 3 - Liquid Glass Shield)
-        if (isSafeBlurActive && isSafeModeEnabled) {
+        if ((isSafeBlurActive || isSafeCoverActive) && isSafeModeEnabled) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFF070C16).copy(alpha = 0.68f)),
+                    .background(if (isSafeCoverActive) Color.Black else Color(0xFF070C16).copy(alpha = 0.68f)),
                 contentAlignment = Alignment.Center
             ) {
                 LiquidGlassContainer(
@@ -503,21 +555,21 @@ fun PlayerScreen(
                             modifier = Modifier.size(56.dp)
                         )
                         Text(
-                            text = "🛡️ مشهد محجوب بواسطة الحارس العائلي",
+                            text = if (isSafeCoverActive) "🛡️ تم حجب المشهد بواسطة الحارس العائلي" else "🛡️ مشهد محمي بواسطة الحارس العائلي",
                             color = Color.White,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center
                         )
                         Text(
-                            text = "تم تضبيب الشاشة تلقائياً بتقنية الزجاج السائل لحماية المشاهدة العائلية حتى انتهاء المشهد",
+                            text = if (isSafeCoverActive) "تم إخفاء الصورة بالكامل لهذه الفترة" else "تم تعتيم الصورة لهذه الفترة؛ يمكنك تخطيها أو متابعة المشاهدة بعد انتهائها",
                             color = Color.White.copy(alpha = 0.80f),
                             style = MaterialTheme.typography.bodySmall,
                             textAlign = TextAlign.Center
                         )
                         FilledTonalButton(
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
-                            onClick = { viewModel.seekRelative(5000L) }
+                            onClick = { viewModel.skipCurrentSafeWatchSegment() }
                         ) {
                             Icon(Icons.Default.FastForward, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
@@ -945,14 +997,21 @@ fun PlayerScreen(
                             )
                         }
 
-                        // Smart Safe-Watch Family Guard (الحارس العائلي 🛡️)
-                        val safeRulesCount = markers.count { it.type.startsWith("SAFE_") }
-                        PlayerPillAction(
-                            icon = Icons.Default.Shield,
-                            label = if (safeRulesCount > 0) "الحارس ($safeRulesCount) 🛡️" else "الحارس العائلي",
-                            isActive = isSafeModeEnabled && safeRulesCount > 0,
-                            onClick = { showSafeWatchSheet = true }
-                        )
+                        // Smart Safe-Watch Family Guard (الحارس العائلي 🛡️) is for local videos.
+                        if (isVideo && (currentMedia?.id ?: -1) > 0) {
+                            val safeRulesCount = visibleSafeWatchRules.size
+                            val safetySuggestionsCount = pendingSafetySuggestions.size
+                            PlayerPillAction(
+                                icon = Icons.Default.Shield,
+                                label = when {
+                                    safetySuggestionsCount > 0 -> "الحارس ($safeRulesCount • اقتراح $safetySuggestionsCount)"
+                                    safeRulesCount > 0 -> "الحارس ($safeRulesCount) 🛡️"
+                                    else -> "الحارس العائلي"
+                                },
+                                isActive = isSafeModeEnabled && safeRulesCount > 0,
+                                onClick = { showSafeWatchSheet = true }
+                            )
+                        }
 
                         // Night Mode
                         PlayerPillAction(
@@ -1000,8 +1059,8 @@ fun PlayerScreen(
 
                         PlayerPillAction(
                             icon = Icons.Default.Bookmarks,
-                            label = "العلامات (${markers.size})",
-                            isActive = markers.isNotEmpty(),
+                            label = "العلامات (${bookmarkMarkers.size})",
+                            isActive = bookmarkMarkers.isNotEmpty(),
                             onClick = { showBookmarksSheet = true }
                         )
 
@@ -1153,7 +1212,7 @@ fun PlayerScreen(
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             // Active A-B Repeat Status Banner, Sleep Timer Countdown & Bookmarks Quick Chips
-                            if (abPointA != null || sleepTimerMinutes != null || markers.isNotEmpty()) {
+                            if (abPointA != null || sleepTimerMinutes != null || bookmarkMarkers.isNotEmpty()) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1188,7 +1247,7 @@ fun PlayerScreen(
                                         )
                                     }
 
-                                    markers.forEach { marker ->
+                                    bookmarkMarkers.forEach { marker ->
                                         LiquidGlassPill(
                                             icon = Icons.Default.Bookmark,
                                             label = "${marker.name} (${formatDuration(marker.timeMs)})",
@@ -1929,7 +1988,7 @@ fun PlayerScreen(
         LiquidGlassBottomSheet(
             visible = showBookmarksSheet,
             onDismissRequest = { showBookmarksSheet = false },
-            title = "العلامات المرجعية (${markers.size}) 🔖",
+            title = "العلامات المرجعية (${bookmarkMarkers.size}) 🔖",
             headerAction = {
                 FilledTonalButton(
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
@@ -1946,7 +2005,7 @@ fun PlayerScreen(
                 }
             }
         ) {
-            if (markers.isEmpty()) {
+            if (bookmarkMarkers.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1972,7 +2031,7 @@ fun PlayerScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(markers, key = { it.id }) { marker ->
+                    items(bookmarkMarkers, key = { it.id }) { marker ->
                         LiquidGlassContainer(
                             shape = RoundedCornerShape(14.dp),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
@@ -2105,241 +2164,576 @@ fun PlayerScreen(
             )
         }
 
-        // LIQUID GLASS BOTTOM SHEET: Smart Safe-Watch & Family Guard Rules (Track 3)
-        val safeRules = markers.filter { it.type.startsWith("SAFE_") }
+        // Family Safe-Watch controls, reviewed local suggestions, and validated rule sharing.
         LiquidGlassBottomSheet(
             visible = showSafeWatchSheet,
             onDismissRequest = { showSafeWatchSheet = false },
-            title = "الحارس العائلي والمشاهدة الآمنة 🛡️",
-            subtitle = "تخطي أو كتم أو تعتيم المشاهد غير الملائمة تلقائياً",
+            title = "الحارس العائلي والمشاهدة الآمنة",
+            subtitle = "القواعد تُطبّق محلياً على الفيديو الحالي فقط",
             headerAction = {
                 Switch(
                     checked = isSafeModeEnabled,
-                    onCheckedChange = { viewModel.toggleSafeMode() }
+                    onCheckedChange = { viewModel.setSafeModeEnabled(it) }
                 )
             }
         ) {
-            LiquidGlassContainer(
-                shape = RoundedCornerShape(16.dp),
-                contentPadding = PaddingValues(12.dp),
-                modifier = Modifier.fillMaxWidth()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 340.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "إضافة قاعدة حماية فورية من الثانية الحالية (${formatDuration(currentPosition)} لمدة 5 ثوانٍ):",
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilledTonalButton(
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
-                            onClick = {
-                                viewModel.addSafeWatchRule(
-                                    startMs = currentPosition,
-                                    endMs = currentPosition + 5000L,
-                                    ruleType = "SAFE_SKIP",
-                                    title = "تخطي مشهد عند ${formatDuration(currentPosition)}"
-                                )
-                                Toast.makeText(context, "تمت إضافة قاعدة تخطي تلقائي ⏩", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
-                        ) {
-                            Text("⏩ تخطي", fontSize = 12.sp)
-                        }
-                        FilledTonalButton(
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
-                            onClick = {
-                                viewModel.addSafeWatchRule(
-                                    startMs = currentPosition,
-                                    endMs = currentPosition + 5000L,
-                                    ruleType = "SAFE_MUTE",
-                                    title = "كتم صوت عند ${formatDuration(currentPosition)}"
-                                )
-                                Toast.makeText(context, "تمت إضافة قاعدة كتم صوت تلقائي 🔇", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
-                        ) {
-                            Text("🔇 كتم صوت", fontSize = 12.sp)
-                        }
-                        FilledTonalButton(
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.84f)),
-                            onClick = {
-                                viewModel.addSafeWatchRule(
-                                    startMs = currentPosition,
-                                    endMs = currentPosition + 5000L,
-                                    ruleType = "SAFE_BLUR",
-                                    title = "تعتيم شاشة عند ${formatDuration(currentPosition)}"
-                                )
-                                Toast.makeText(context, "تمت إضافة قاعدة تعتيم بصري 🛡️", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
-                        ) {
-                            Text("🛡️ تعتيم", fontSize = 12.sp)
-                        }
+                Text("ملف الحماية", color = Color.White, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SafeWatchProfile.entries.forEach { profile ->
+                        FilterChip(
+                            selected = profile == activeSafeWatchProfile,
+                            onClick = { viewModel.setActiveSafeWatchProfile(profile) },
+                            label = { Text(profile.label) }
+                        )
                     }
                 }
-            }
+                Text(
+                    "تُحفظ القواعد لكل ملف عائلي على حدة، ويمكن تعميم القاعدة على جميع الملفات عند تحريرها.",
+                    color = Color.White.copy(alpha = 0.72f),
+                    style = MaterialTheme.typography.bodySmall
+                )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
                 Button(
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                     onClick = {
-                        viewModel.generateDemoAiSafeWatchRules()
-                        Toast.makeText(context, "🤖 تم توليد 3 قواعد حماية ذكية (تخطي + كتم + تعتيم) على الشريط الزمني!", Toast.LENGTH_LONG).show()
+                        safeRuleBeingEdited = null
+                        showSafeRuleEditor = true
                     },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("توليد حماية ذكية 🤖", fontSize = 12.sp)
+                    Text("إضافة قاعدة بفترة زمنية دقيقة")
                 }
 
-                OutlinedButton(
-                    onClick = {
-                        val json = viewModel.exportSafeWatchRulesJson()
-                        try {
-                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_SUBJECT, "ملف الحماية العائلية SafePlayer (.safeplay)")
-                                putExtra(Intent.EXTRA_TEXT, json)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilledTonalButton(
+                        onClick = {
+                            viewModel.analyzeLoadedSubtitlesForSafety { count ->
+                                if (viewModel.safeWatchAuthorizationRequired.value) return@analyzeLoadedSubtitlesForSafety
+                                Toast.makeText(
+                                    context,
+                                    if (count > 0) "أُضيفت $count اقتراحات محلية للمراجعة" else "لم تُكتشف كلمات مطابقة في الترجمة المحملة",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             }
-                            context.startActivity(Intent.createChooser(sendIntent, "مشاركة ملف الحماية (.safeplay)"))
-                        } catch (_: Exception) {
-                            Toast.makeText(context, "تعذر مشاركة ملف الحماية", Toast.LENGTH_SHORT).show()
-                        }
+                        },
+                        enabled = subtitleCues.isNotEmpty(),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                    ) {
+                        Icon(Icons.Default.Subtitles, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("فحص الترجمة", fontSize = 12.sp)
                     }
-                ) {
-                    Icon(Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("تصدير", color = Color.White, fontSize = 12.sp)
+                    FilledTonalButton(
+                        onClick = {
+                            viewModel.createVisualSafetySuggestions { count ->
+                                if (viewModel.safeWatchAuthorizationRequired.value) return@createVisualSafetySuggestions
+                                Toast.makeText(
+                                    context,
+                                    if (count > 0) "أُضيفت $count اقتراحات بصرية للمراجعة" else "لا توجد نتائج بصرية محلية مناسبة للمراجعة",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("نتائج الفحص البصري", fontSize = 12.sp)
+                    }
                 }
+                Text(
+                    "فحص الترجمة يعمل على الجهاز ويقترح فترات من الكلمات المطابقة فقط؛ لا يُفعّل الحجب دون مراجعتك. الفحص البصري يستخدم نتائج التحليل المحلي الموجودة مسبقاً.",
+                    color = Color.White.copy(alpha = 0.68f),
+                    style = MaterialTheme.typography.labelSmall
+                )
 
-                OutlinedButton(
-                    onClick = { showImportSafeWatchDialog = true }
-                ) {
-                    Text("استيراد", color = Color.White, fontSize = 12.sp)
-                }
-            }
-
-            Text(
-                text = "قواعد الحماية النشطة لهذا الفيديو (${safeRules.size}):",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.bodyMedium
-            )
-
-            if (safeRules.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 14.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "لا توجد قواعد حماية مضافة بعد. اضغط على 'توليد حماية ذكية 🤖' أو أضف قاعدة يدوياً.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.72f),
-                        textAlign = TextAlign.Center
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 180.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(safeRules, key = { it.id }) { rule ->
-                        val endMs = rule.description?.toLongOrNull() ?: (rule.timeMs + 5000L)
-                        val badgeText = when (rule.type) {
-                            "SAFE_SKIP" -> "⏩ تخطي تلقائي"
-                            "SAFE_MUTE" -> "🔇 كتم الصوت"
-                            "SAFE_BLUR" -> "🛡️ تعتيم الشاشة"
-                            else -> "حماية"
-                        }
+                Text(
+                    "اقتراحات تحتاج مراجعة (${pendingSafetySuggestions.size})",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+                if (pendingSafetySuggestions.isEmpty()) {
+                    Text("لا توجد اقتراحات معلّقة.", color = Color.White.copy(alpha = 0.68f), style = MaterialTheme.typography.bodySmall)
+                } else {
+                    pendingSafetySuggestions.forEach { suggestion ->
+                        val category = SafeWatchCategory.fromKey(suggestion.category) ?: SafeWatchCategory.CUSTOM
                         LiquidGlassContainer(
                             shape = RoundedCornerShape(14.dp),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { viewModel.seekTo(suggestion.timeMs) }) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = "معاينة الاقتراح")
+                                }
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(rule.name ?: badgeText, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                    Text(category.label, color = Color.White, fontWeight = FontWeight.Bold)
                                     Text(
-                                        text = "$badgeText • من ${formatDuration(rule.timeMs)} إلى ${formatDuration(endMs)}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary
+                                        "${formatSafeWatchTime(suggestion.timeMs)}–${formatSafeWatchTime(suggestion.safeWatchEndTimeMs())} • ثقة تقريبية ${((suggestion.confidence ?: 0f) * 100).toInt()}%",
+                                        color = Color.White.copy(alpha = 0.72f),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                    Text(
+                                        if (suggestion.source == "SUBTITLE_KEYWORD") "مطابقة كلمات في الترجمة" else "نتيجة من فحص بصري محلي",
+                                        color = Color.White.copy(alpha = 0.62f),
+                                        style = MaterialTheme.typography.labelSmall
                                     )
                                 }
-                                IconButton(onClick = { viewModel.removeMarker(rule.id) }) {
-                                    Icon(Icons.Default.DeleteOutline, contentDescription = "حذف القاعدة", tint = Color(0xFFFF5252))
+                                TextButton(onClick = {
+                                    safeRuleBeingEdited = suggestion
+                                    showSafeRuleEditor = true
+                                }) { Text("مراجعة") }
+                                IconButton(onClick = { viewModel.rejectSafeWatchSuggestion(suggestion.id) }) {
+                                    Icon(Icons.Default.Close, contentDescription = "رفض الاقتراح", tint = Color.White.copy(alpha = 0.8f))
                                 }
                             }
                         }
+                    }
+                }
+
+                Text(
+                    "القواعد النشطة لهذا الملف (${visibleSafeWatchRules.size})",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+                if (visibleSafeWatchRules.isEmpty()) {
+                    Text("لا توجد قواعد نشطة لملف الحماية الحالي.", color = Color.White.copy(alpha = 0.68f), style = MaterialTheme.typography.bodySmall)
+                } else {
+                    visibleSafeWatchRules.forEach { rule ->
+                        val action = rule.safeWatchAction() ?: SafeWatchAction.BLUR
+                        val category = SafeWatchCategory.fromKey(rule.category) ?: SafeWatchCategory.CUSTOM
+                        val sourceLabel = when (rule.source) {
+                            "SUBTITLE_KEYWORD" -> "تحليل ترجمة محلي"
+                            "LOCAL_VISUAL_AI" -> "تحليل بصري محلي"
+                            "IMPORTED" -> "مستورد"
+                            "LEGACY" -> "قاعدة قديمة"
+                            "MANUAL", null -> "يدوي"
+                            else -> rule.source ?: "غير محدد"
+                        }
+                        val confidenceLabel = rule.confidence?.let { " • ثقة تقديرية ${(it * 100).toInt()}%" }.orEmpty()
+                        LiquidGlassContainer(
+                            shape = RoundedCornerShape(14.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { viewModel.seekTo(rule.timeMs) }) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = "معاينة القاعدة")
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(rule.name ?: category.label, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(
+                                        "${category.label} • ${action.label} • ${formatSafeWatchTime(rule.timeMs)}–${formatSafeWatchTime(rule.safeWatchEndTimeMs())}",
+                                        color = Color.White.copy(alpha = 0.72f),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                    Text(
+                                        if (rule.profileId == SAFE_WATCH_ALL_PROFILES || rule.profileId.isNullOrBlank()) "كل الملفات العائلية" else SafeWatchProfile.fromKey(rule.profileId).label,
+                                        color = Color.White.copy(alpha = 0.58f),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                    Text(
+                                        "المصدر: $sourceLabel$confidenceLabel",
+                                        color = Color.White.copy(alpha = 0.58f),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                                IconButton(onClick = {
+                                    safeRuleBeingEdited = rule
+                                    showSafeRuleEditor = true
+                                }) {
+                                    Icon(Icons.Default.Edit, contentDescription = "تعديل القاعدة", tint = Color.White)
+                                }
+                                IconButton(onClick = { viewModel.removeMarker(rule.id) }) {
+                                    Icon(Icons.Default.DeleteOutline, contentDescription = "حذف القاعدة", tint = Color(0xFFFF7777))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.exportSafeWatchRulesJson { json ->
+                                if (json == null) {
+                                    if (!viewModel.safeWatchAuthorizationRequired.value) {
+                                        Toast.makeText(context, "لا توجد قواعد للتصدير أو تجاوز عددها 500 قاعدة", Toast.LENGTH_SHORT).show()
+                                    }
+                                    return@exportSafeWatchRulesJson
+                                }
+                                try {
+                                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_SUBJECT, "قواعد حماية SafePlayer")
+                                        putExtra(Intent.EXTRA_TEXT, json)
+                                    }
+                                    context.startActivity(Intent.createChooser(sendIntent, "مشاركة ملف الحماية"))
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "تعذر مشاركة ملف الحماية", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("تصدير")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            importSafeWatchPreview = null
+                            importSafeWatchJsonInput = ""
+                            showImportSafeWatchDialog = true
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("استيراد")
                     }
                 }
             }
         }
 
-        // LIQUID GLASS DIALOG: Import .safeplay Family Guard JSON
+        SafeWatchRuleEditorDialog(
+            visible = showSafeRuleEditor,
+            existingRule = safeRuleBeingEdited,
+            currentPositionMs = currentPosition,
+            durationMs = duration,
+            activeProfile = activeSafeWatchProfile,
+            onDismiss = {
+                showSafeRuleEditor = false
+                safeRuleBeingEdited = null
+            },
+            onSave = { draft ->
+                viewModel.saveSafeWatchRule(draft, safeRuleBeingEdited?.id) { saved ->
+                    if (saved) {
+                        showSafeRuleEditor = false
+                        safeRuleBeingEdited = null
+                        Toast.makeText(context, "تم حفظ قاعدة الحماية", Toast.LENGTH_SHORT).show()
+                    } else if (!viewModel.safeWatchAuthorizationRequired.value) {
+                        Toast.makeText(context, "تحقق من أن نهاية المقطع بعد بدايته وضمن مدة الفيديو", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        )
+
         LiquidGlassDialog(
             visible = showImportSafeWatchDialog,
-            onDismissRequest = { showImportSafeWatchDialog = false },
-            title = "استيراد ملف الحماية العائلية (.safeplay)",
+            onDismissRequest = {
+                showImportSafeWatchDialog = false
+                importSafeWatchPreview = null
+            },
+            title = "استيراد قواعد الحماية",
             confirmButton = {
                 Button(
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f)),
                     onClick = {
-                        viewModel.importSafeWatchRulesJson(importSafeWatchJsonInput) { ok, count ->
-                            if (ok) {
-                                Toast.makeText(context, "تم استيراد $count قواعد حماية عائلية بنجاح 🛡️", Toast.LENGTH_SHORT).show()
-                                importSafeWatchJsonInput = ""
-                                showImportSafeWatchDialog = false
-                            } else {
-                                Toast.makeText(context, "صيغة النص غير صالحة، تأكد من نسخ ملف .safeplay كامل", Toast.LENGTH_SHORT).show()
+                        val preview = importSafeWatchPreview
+                        if (preview?.canApply == true) {
+                            viewModel.importSafeWatchRules(preview) { ok, count ->
+                                if (ok) {
+                                    Toast.makeText(context, "تم تطبيق $count قاعدة بعد التحقق", Toast.LENGTH_SHORT).show()
+                                    showImportSafeWatchDialog = false
+                                    importSafeWatchPreview = null
+                                    importSafeWatchJsonInput = ""
+                                } else if (!viewModel.safeWatchAuthorizationRequired.value) {
+                                    Toast.makeText(context, "لم تُضف قواعد جديدة؛ قد تكون موجودة بالفعل أو لم تعد صالحة", Toast.LENGTH_SHORT).show()
+                                }
                             }
+                        } else {
+                            importSafeWatchPreview = viewModel.previewSafeWatchRulesJson(importSafeWatchJsonInput)
                         }
                     }
                 ) {
-                    Text("استيراد وتفعيل")
+                    Text(if (importSafeWatchPreview?.canApply == true) "تطبيق ${importSafeWatchPreview?.rules?.size ?: 0} قاعدة" else "تحقق ومعاينة")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showImportSafeWatchDialog = false }) {
-                    Text("إلغاء", color = Color.White)
-                }
+                TextButton(onClick = {
+                    showImportSafeWatchDialog = false
+                    importSafeWatchPreview = null
+                }) { Text("إلغاء", color = Color.White) }
             }
         ) {
             Text(
-                text = "الصق محتوى ملف الحماية (.safeplay JSON) لتطبيق قواعد التخطي والكتم تلقائياً على هذا الفيديو:",
-                color = Color.White.copy(alpha = 0.85f),
+                "الحزم الجديدة تُطابق ببصمة بيانات الفيديو، والقديمة باسم الملف فقط؛ راجع الأوقات والإجراءات قبل التطبيق.",
+                color = Color.White.copy(alpha = 0.82f),
                 style = MaterialTheme.typography.bodySmall
             )
-            OutlinedTextField(
-                value = importSafeWatchJsonInput,
-                onValueChange = { importSafeWatchJsonInput = it },
-                label = { Text("محتوى ملف .safeplay", color = Color.White.copy(alpha = 0.75f)) },
-                minLines = 4,
-                maxLines = 8,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.35f)
-                ),
-                modifier = Modifier.fillMaxWidth()
+            if (importSafeWatchPreview == null) {
+                OutlinedTextField(
+                    value = importSafeWatchJsonInput,
+                    onValueChange = {
+                        importSafeWatchJsonInput = it
+                        importSafeWatchPreview = null
+                    },
+                    label = { Text("محتوى ملف الحماية JSON", color = Color.White.copy(alpha = 0.75f)) },
+                    minLines = 4,
+                    maxLines = 8,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.35f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else if (importSafeWatchPreview?.error != null) {
+                Text(importSafeWatchPreview?.error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = { importSafeWatchPreview = null }) { Text("تعديل ملف JSON", color = Color.White) }
+            } else {
+                Text(
+                    "معاينة ${importSafeWatchPreview?.rules?.size ?: 0} قاعدة. راجع القائمة؛ لم تُطبّق أي قاعدة بعد.",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+                importSafeWatchPreview?.rules?.forEachIndexed { index, draft ->
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            "${index + 1}. ${draft.category.label} • ${draft.action.label} • ${formatSafeWatchTime(draft.startMs)}–${formatSafeWatchTime(draft.endMs)}",
+                            color = Color.White.copy(alpha = 0.88f),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Text(
+                            "${draft.name} • ${if (draft.profileId == SAFE_WATCH_ALL_PROFILES) "كل الملفات" else SafeWatchProfile.fromKey(draft.profileId).label}",
+                            color = Color.White.copy(alpha = 0.66f),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+            }
+        }
+
+        if (showSafeWatchParentPinDialog && isSafeWatchAuthorizationRequired) {
+            AlertDialog(
+                onDismissRequest = {
+                    showSafeWatchParentPinDialog = false
+                    viewModel.dismissSafeWatchAuthorizationRequest()
+                },
+                title = { Text("تأكيد الوالدين") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("إدارة ملفات الحماية أو تعديل القواعد ومراجعة الاقتراحات تتطلب رمز الوالدين.")
+                        OutlinedTextField(
+                            value = safeWatchParentPin,
+                            onValueChange = { value ->
+                                if (value.length <= 6 && value.all(Char::isDigit)) safeWatchParentPin = value
+                            },
+                            label = { Text("رمز الوالدين") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        viewModel.verifySafeWatchParentPin(safeWatchParentPin) { verified ->
+                            if (verified) {
+                                showSafeWatchParentPinDialog = false
+                                safeWatchParentPin = ""
+                                Toast.makeText(context, "تم التحقق من الوالدين", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "رمز الوالدين غير صحيح", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }) { Text("تحقق") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showSafeWatchParentPinDialog = false
+                        viewModel.dismissSafeWatchAuthorizationRequest()
+                    }) { Text("إلغاء") }
+                }
             )
         }
+    }
+}
+}
+
+@Composable
+private fun SafeWatchRuleEditorDialog(
+    visible: Boolean,
+    existingRule: TimelineMarker?,
+    currentPositionMs: Long,
+    durationMs: Long,
+    activeProfile: SafeWatchProfile,
+    onDismiss: () -> Unit,
+    onSave: (SafeWatchRuleDraft) -> Unit
+) {
+    if (!visible) return
+
+    val initialCategory = SafeWatchCategory.fromKey(existingRule?.category) ?: SafeWatchCategory.CUSTOM
+    val initialStart = existingRule?.timeMs ?: currentPositionMs.coerceAtLeast(0L)
+    val initialEnd = existingRule?.safeWatchEndTimeMs()
+        ?: (initialStart + 5_000L).let { if (durationMs > 0L) it.coerceAtMost(durationMs) else it }
+    var startText by remember(existingRule?.id, visible) { mutableStateOf(formatSafeWatchTime(initialStart)) }
+    var endText by remember(existingRule?.id, visible) { mutableStateOf(formatSafeWatchTime(initialEnd)) }
+    var selectedActionKey by remember(existingRule?.id, visible) {
+        mutableStateOf(
+            existingRule?.safeWatchAction()?.key
+                ?: initialCategory.suggestedAction.key
+        )
+    }
+    var selectedCategoryKey by remember(existingRule?.id, visible) { mutableStateOf(initialCategory.key) }
+    var selectedProfileId by remember(existingRule?.id, visible) {
+        mutableStateOf(existingRule?.profileId ?: activeProfile.key)
+    }
+    var ruleName by remember(existingRule?.id, visible) { mutableStateOf(existingRule?.name.orEmpty()) }
+
+    val startMs = parseSafeWatchTime(startText)
+    val endMs = parseSafeWatchTime(endText)
+    val isRangeValid = startMs != null && endMs != null && endMs > startMs &&
+        (durationMs <= 0L || endMs <= durationMs)
+    val selectedAction = SafeWatchAction.fromKey(selectedActionKey) ?: SafeWatchAction.BLUR
+    val selectedCategory = SafeWatchCategory.fromKey(selectedCategoryKey) ?: SafeWatchCategory.CUSTOM
+    val scopeOptions = listOf(
+        activeProfile.key to "${activeProfile.label} فقط",
+        SAFE_WATCH_ALL_PROFILES to "كل الملفات العائلية"
+    ).distinctBy { it.first }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                when {
+                    existingRule?.isSafeWatchSuggestion() == true -> "مراجعة اقتراح الحماية"
+                    existingRule != null -> "تعديل قاعدة الحماية"
+                    else -> "إضافة قاعدة حماية"
+                }
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("حدد حدود المقطع بصيغة MM:SS أو HH:MM:SS.", style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = startText,
+                        onValueChange = { startText = it },
+                        label = { Text("البداية") },
+                        placeholder = { Text("00:12") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = endText,
+                        onValueChange = { endText = it },
+                        label = { Text("النهاية") },
+                        placeholder = { Text("00:18") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                SafeWatchChoiceDropdown(
+                    title = "التصنيف",
+                    selectedKey = selectedCategoryKey,
+                    options = SafeWatchCategory.entries.map { it.key to it.label },
+                    onSelected = { selectedCategoryKey = it }
+                )
+                SafeWatchChoiceDropdown(
+                    title = "الإجراء",
+                    selectedKey = selectedActionKey,
+                    options = SafeWatchAction.entries.map { it.key to it.label },
+                    onSelected = { selectedActionKey = it }
+                )
+                SafeWatchChoiceDropdown(
+                    title = "نطاق التطبيق",
+                    selectedKey = selectedProfileId,
+                    options = scopeOptions,
+                    onSelected = { selectedProfileId = it }
+                )
+                OutlinedTextField(
+                    value = ruleName,
+                    onValueChange = { ruleName = it.take(100) },
+                    label = { Text("ملاحظة اختيارية") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (!isRangeValid) {
+                    Text(
+                        if (durationMs > 0L) "تأكد أن البداية قبل النهاية وأن المقطع ضمن مدة الفيديو." else "أدخل فترة زمنية صحيحة.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                if (existingRule?.isSafeWatchSuggestion() == true) {
+                    Text(
+                        "الاقتراح غير نشط حتى تحفظه بعد المراجعة.",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = isRangeValid,
+                onClick = {
+                    val start = startMs ?: return@TextButton
+                    val end = endMs ?: return@TextButton
+                    onSave(
+                        SafeWatchRuleDraft(
+                            startMs = start,
+                            endMs = end,
+                            action = selectedAction,
+                            category = selectedCategory,
+                            profileId = selectedProfileId,
+                            name = ruleName,
+                            confidence = existingRule?.confidence,
+                            source = existingRule?.source ?: "MANUAL"
+                        )
+                    )
+                }
+            ) { Text("حفظ") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }
+    )
+}
+
+@Composable
+private fun SafeWatchChoiceDropdown(
+    title: String,
+    selectedKey: String,
+    options: List<Pair<String, String>>,
+    onSelected: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedLabel = options.firstOrNull { it.first == selectedKey }?.second ?: options.firstOrNull()?.second.orEmpty()
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("$title: $selectedLabel", maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { (key, label) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = {
+                        onSelected(key)
+                        expanded = false
+                    }
+                )
+            }
         }
     }
 }

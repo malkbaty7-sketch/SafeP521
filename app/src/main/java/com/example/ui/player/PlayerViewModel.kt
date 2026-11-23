@@ -23,6 +23,24 @@ import com.example.data.MediaRepository
 import com.example.data.MediaType
 import com.example.data.WatchedState
 import com.example.security.SecurityAction
+import com.example.safety.SAFE_WATCH_ACCEPTED
+import com.example.safety.SAFE_WATCH_ALL_PROFILES
+import com.example.safety.SAFE_WATCH_PENDING
+import com.example.safety.SAFE_WATCH_REJECTED
+import com.example.safety.SafeWatchAction
+import com.example.safety.SafeWatchCategory
+import com.example.safety.SafeWatchImportPreview
+import com.example.safety.SafeWatchProfile
+import com.example.safety.SafeWatchRuleDraft
+import com.example.safety.SubtitleSafetyAnalyzer
+import com.example.safety.TimedSafetyText
+import com.example.safety.appliesToSafetyProfile
+import com.example.safety.isSafeWatchRelated
+import com.example.safety.isSafeWatchRule
+import com.example.safety.isSafeWatchSuggestion
+import com.example.safety.safeWatchAction
+import com.example.safety.safeWatchEndTimeMs
+import com.example.safety.isValidSafeWatchInterval
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.Dispatchers
@@ -31,8 +49,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.Locale
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicLong
 import org.json.JSONArray
 import org.json.JSONObject
@@ -55,6 +78,11 @@ class PlayerViewModel(
     application: Application,
     private val repository: MediaRepository
 ) : AndroidViewModel(application) {
+
+    private val safeWatchPreferences = application.getSharedPreferences("safe_watch_preferences", Context.MODE_PRIVATE)
+    private val initialSafeWatchProfile = SafeWatchProfile.fromKey(
+        safeWatchPreferences.getString("active_profile", SafeWatchProfile.CHILDREN.key)
+    )
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     var player: Player? = null
@@ -102,18 +130,31 @@ class PlayerViewModel(
     private val _isControlsLocked = MutableStateFlow(false)
     val isControlsLocked: StateFlow<Boolean> = _isControlsLocked.asStateFlow()
 
-    // Smart Safe-Watch & Family Guard State (Track 3)
-    private val _isSafeModeEnabled = MutableStateFlow(true)
+    // Smart Safe-Watch & Family Guard State
+    private val _activeSafeWatchProfile = MutableStateFlow(initialSafeWatchProfile)
+    val activeSafeWatchProfile: StateFlow<SafeWatchProfile> = _activeSafeWatchProfile.asStateFlow()
+
+    private val _isSafeModeEnabled = MutableStateFlow(
+        safeWatchPreferences.getBoolean("safe_mode_${initialSafeWatchProfile.key}", true)
+    )
     val isSafeModeEnabled: StateFlow<Boolean> = _isSafeModeEnabled.asStateFlow()
 
     private val _isSafeBlurActive = MutableStateFlow(false)
     val isSafeBlurActive: StateFlow<Boolean> = _isSafeBlurActive.asStateFlow()
+
+    private val _isSafeCoverActive = MutableStateFlow(false)
+    val isSafeCoverActive: StateFlow<Boolean> = _isSafeCoverActive.asStateFlow()
 
     private val _isSafeMuteActive = MutableStateFlow(false)
     val isSafeMuteActive: StateFlow<Boolean> = _isSafeMuteActive.asStateFlow()
 
     private val _safeWatchBannerMessage = MutableStateFlow<String?>(null)
     val safeWatchBannerMessage: StateFlow<String?> = _safeWatchBannerMessage.asStateFlow()
+
+    private val _safeWatchAuthorizationRequired = MutableStateFlow(false)
+    val safeWatchAuthorizationRequired: StateFlow<Boolean> = _safeWatchAuthorizationRequired.asStateFlow()
+    private var pendingSafeWatchAuthorizationAction: (() -> Unit)? = null
+    private var pendingSafeWatchAuthorizationMediaId: Int? = null
 
     // Live Video Filters & Color Adjustments State (Track 2)
     private val _videoFilterPreset = MutableStateFlow("Normal")
@@ -158,6 +199,8 @@ class PlayerViewModel(
     private val _sleepTimerRemainingSeconds = MutableStateFlow<Long?>(null)
     val sleepTimerRemainingSeconds: StateFlow<Long?> = _sleepTimerRemainingSeconds.asStateFlow()
     private var sleepTimerJob: Job? = null
+    private var markersJob: Job? = null
+    private val safeWatchImportMutex = Mutex()
 
     private val _playlistItems = MutableStateFlow<List<com.example.data.MediaItem>>(emptyList())
     val playlistItems: StateFlow<List<com.example.data.MediaItem>> = _playlistItems.asStateFlow()
@@ -255,6 +298,9 @@ class PlayerViewModel(
 
     fun loadStreamUrl(url: String, title: String) {
         clearSubtitles()
+        markersJob?.cancel()
+        _markers.value = emptyList()
+        resetSafeWatchPlaybackState()
         currentMediaId = -1
         _currentMedia.value = com.example.data.MediaItem(
             id = -1,
@@ -267,6 +313,8 @@ class PlayerViewModel(
             durationMs = 0L
         )
         _bookmarks.value = emptyList()
+        _currentPosition.value = 0L
+        _duration.value = 0L
         val p = player
         if (p != null) {
             p.setMediaItem(androidx.media3.common.MediaItem.fromUri(url))
@@ -359,9 +407,18 @@ class PlayerViewModel(
 
     private fun loadAuthorizedMediaItem(dbItem: com.example.data.MediaItem, startMs: Long?) {
         val isSameMedia = currentMediaId == dbItem.id && player?.currentMediaItem != null
-        if (!isSameMedia) clearSubtitles()
+        if (!isSameMedia) {
+            clearSubtitles()
+            markersJob?.cancel()
+            _markers.value = emptyList()
+            resetSafeWatchPlaybackState()
+        }
         _currentMedia.value = dbItem
         currentMediaId = dbItem.id
+        if (!isSameMedia) {
+            _currentPosition.value = (startMs ?: dbItem.lastPositionMs).coerceAtLeast(0L)
+            _duration.value = dbItem.durationMs.coerceAtLeast(0L)
+        }
 
         viewModelScope.launch {
             try {
@@ -401,9 +458,13 @@ class PlayerViewModel(
         }
         player?.playWhenReady = true
 
-        viewModelScope.launch {
-            repository.getMarkersForMedia(dbItem.id).collect {
-                _markers.value = it
+        markersJob?.cancel()
+        markersJob = viewModelScope.launch {
+            repository.getMarkersForMedia(dbItem.id).collect { mediaMarkers ->
+                if (currentMediaId == dbItem.id) {
+                    _markers.value = mediaMarkers
+                    evaluateSafeWatchRules(_currentPosition.value)
+                }
             }
         }
         refreshBookmarks()
@@ -412,11 +473,16 @@ class PlayerViewModel(
     fun stopAndClearMedia() {
         mediaLoadRequestIds.incrementAndGet()
         clearSubtitles()
+        markersJob?.cancel()
+        _markers.value = emptyList()
+        resetSafeWatchPlaybackState()
         savePosition(false)
         player?.pause()
         player?.clearMediaItems()
         _currentMedia.value = null
         currentMediaId = null
+        _currentPosition.value = 0L
+        _duration.value = 0L
         _isPlaying.value = false
     }
 
@@ -438,9 +504,11 @@ class PlayerViewModel(
     }
 
     fun seekTo(positionMs: Long) {
-        player?.seekTo(positionMs)
-        _currentPosition.value = positionMs
-        updateSubtitleForPosition(positionMs)
+        val boundedPosition = if (_duration.value > 0L) positionMs.coerceIn(0L, _duration.value) else positionMs.coerceAtLeast(0L)
+        player?.seekTo(boundedPosition)
+        _currentPosition.value = boundedPosition
+        evaluateSafeWatchRules(boundedPosition)
+        updateSubtitleForPosition(_currentPosition.value)
     }
 
     fun seekRelative(offsetMs: Long) {
@@ -474,82 +542,70 @@ class PlayerViewModel(
             }
         }
 
-        // Handle Smart Safe-Watch Family Guard Rules (Track 3)
+        // Apply guard rules before choosing the subtitle for the displayed playback position.
         evaluateSafeWatchRules(cur)
+        updateSubtitleForPosition(_currentPosition.value)
+    }
 
-        // Update active subtitle cue
-        updateSubtitleForPosition(cur)
+    private fun resetSafeWatchPlaybackState() {
+        _isSafeBlurActive.value = false
+        _isSafeCoverActive.value = false
+        _isSafeMuteActive.value = false
+        _safeWatchBannerMessage.value = null
+        player?.volume = if (_isMuted.value) 0f else 1f
     }
 
     private fun evaluateSafeWatchRules(positionMs: Long) {
         if (!_isSafeModeEnabled.value) {
-            if (_isSafeBlurActive.value) _isSafeBlurActive.value = false
-            if (_isSafeMuteActive.value) {
-                _isSafeMuteActive.value = false
-                player?.volume = if (_isMuted.value) 0f else 1f
-            }
-            _safeWatchBannerMessage.value = null
+            resetSafeWatchPlaybackState()
             return
         }
 
-        val safeMarkers = _markers.value.filter { it.type.startsWith("SAFE_") }
-        if (safeMarkers.isEmpty()) {
-            if (_isSafeBlurActive.value) _isSafeBlurActive.value = false
-            if (_isSafeMuteActive.value) {
-                _isSafeMuteActive.value = false
-                player?.volume = if (_isMuted.value) 0f else 1f
-            }
-            _safeWatchBannerMessage.value = null
-            return
+        val activeProfile = _activeSafeWatchProfile.value
+        val rules = _markers.value.filter { marker ->
+            marker.isSafeWatchRule() && marker.appliesToSafetyProfile(activeProfile)
         }
-
-        // 1. Check SAFE_SKIP
-        val skipMarker = safeMarkers.firstOrNull { marker ->
-            if (marker.type != "SAFE_SKIP") return@firstOrNull false
-            val endMs = marker.description?.toLongOrNull() ?: (marker.timeMs + 5000L)
-            positionMs in marker.timeMs until (endMs - 200L)
-        }
-        if (skipMarker != null) {
-            val targetEndMs = skipMarker.description?.toLongOrNull() ?: (skipMarker.timeMs + 5000L)
+        var playbackPosition = positionMs
+        var lastSkippedRule: com.example.data.TimelineMarker? = null
+        while (true) {
+            val skipRule = rules.asSequence()
+                .filter { marker ->
+                    marker.safeWatchAction() == SafeWatchAction.SKIP &&
+                        playbackPosition >= marker.timeMs && playbackPosition < marker.safeWatchEndTimeMs()
+                }
+                .maxByOrNull { it.safeWatchEndTimeMs() }
+                ?: break
+            val targetEndMs = skipRule.safeWatchEndTimeMs()
+                .coerceAtMost(_duration.value.takeIf { it > 0L } ?: Long.MAX_VALUE)
+            if (targetEndMs <= playbackPosition) break
             player?.seekTo(targetEndMs)
+            playbackPosition = targetEndMs
             _currentPosition.value = targetEndMs
-            _safeWatchBannerMessage.value = "🛡️ الحارس العائلي: تم تخطي مشهد (${skipMarker.name ?: "محجوب"}) تلقائياً"
-            return
+            lastSkippedRule = skipRule
         }
 
-        // 2. Check SAFE_MUTE
-        val muteMarker = safeMarkers.firstOrNull { marker ->
-            if (marker.type != "SAFE_MUTE") return@firstOrNull false
-            val endMs = marker.description?.toLongOrNull() ?: (marker.timeMs + 5000L)
-            positionMs in marker.timeMs..endMs
-        }
-        if (muteMarker != null) {
-            if (!_isSafeMuteActive.value) {
-                _isSafeMuteActive.value = true
-                player?.volume = 0f
-            }
-            _safeWatchBannerMessage.value = "🔇 الحارس العائلي: كتم الصوت مؤقتاً (${muteMarker.name ?: "حماية سمعية"})"
-        } else if (_isSafeMuteActive.value) {
-            _isSafeMuteActive.value = false
-            player?.volume = if (_isMuted.value) 0f else 1f
-            _safeWatchBannerMessage.value = null
-        }
+        val activeRules = rules.filter { playbackPosition >= it.timeMs && playbackPosition < it.safeWatchEndTimeMs() }
+        val muteRule = activeRules.firstOrNull { it.safeWatchAction() == SafeWatchAction.MUTE }
+        val blurRule = activeRules.firstOrNull { it.safeWatchAction() == SafeWatchAction.BLUR }
+        val coverRule = activeRules.firstOrNull { it.safeWatchAction() == SafeWatchAction.COVER }
 
-        // 3. Check SAFE_BLUR
-        val blurMarker = safeMarkers.firstOrNull { marker ->
-            if (marker.type != "SAFE_BLUR") return@firstOrNull false
-            val endMs = marker.description?.toLongOrNull() ?: (marker.timeMs + 5000L)
-            positionMs in marker.timeMs..endMs
-        }
-        if (blurMarker != null) {
-            _isSafeBlurActive.value = true
-            _safeWatchBannerMessage.value = "🛡️ الحارس العائلي: تم تعتيم المشهد لحماية المشاهدة (${blurMarker.name ?: "مشهد محجوب"})"
-        } else {
-            if (_isSafeBlurActive.value) {
-                _isSafeBlurActive.value = false
-                if (muteMarker == null) _safeWatchBannerMessage.value = null
+        _isSafeMuteActive.value = muteRule != null
+        _isSafeBlurActive.value = blurRule != null
+        _isSafeCoverActive.value = coverRule != null
+        player?.volume = if (_isMuted.value || muteRule != null) 0f else 1f
+
+        val displayedRule = coverRule ?: blurRule ?: muteRule
+        _safeWatchBannerMessage.value = displayedRule?.let { rule ->
+            val actionLabel = when (rule.safeWatchAction()) {
+                SafeWatchAction.MUTE -> "كتم الصوت"
+                SafeWatchAction.COVER -> "حجب الصورة"
+                else -> "تعتيم الصورة"
             }
+            "الحارس العائلي: $actionLabel (${rule.name ?: "مقطع محمي"})"
+        } ?: lastSkippedRule?.let { rule ->
+            "الحارس العائلي: تم تخطي المقطع (${rule.name ?: "مشهد محمي"})"
         }
+        updateSubtitleForPosition(playbackPosition)
     }
 
     private fun updateSubtitleForPosition(positionMs: Long) {
@@ -597,9 +653,7 @@ class PlayerViewModel(
     }
 
     fun toggleSafeMode() {
-        val newVal = !_isSafeModeEnabled.value
-        _isSafeModeEnabled.value = newVal
-        evaluateSafeWatchRules(_currentPosition.value)
+        setSafeModeEnabled(!_isSafeModeEnabled.value)
     }
 
     // --- Track 2: Live Video Filters & Instant Snapshot ---
@@ -729,110 +783,529 @@ class PlayerViewModel(
         }
     }
 
-    // --- Track 3: Smart Safe-Watch Family Guard Rules ---
-    fun addSafeWatchRule(startMs: Long, endMs: Long, ruleType: String, title: String) {
-        val mediaId = currentMediaId ?: return
-        val validEnd = endMs.coerceAtLeast(startMs + 1000L)
+    // --- Family Safe-Watch Rules ---
+    private suspend fun canManageSafeWatch(retryAfterAuthorization: (() -> Unit)? = null): Boolean {
+        val manager = safeApp?.securityManager ?: return true
+        val allowed = manager.canManageSafeWatch()
+        if (!allowed) {
+            if (retryAfterAuthorization != null) {
+                pendingSafeWatchAuthorizationAction = retryAfterAuthorization
+                pendingSafeWatchAuthorizationMediaId = currentMediaId
+            }
+            _safeWatchAuthorizationRequired.value = true
+        } else if (_safeWatchAuthorizationRequired.value) {
+            pendingSafeWatchAuthorizationAction = null
+            pendingSafeWatchAuthorizationMediaId = null
+            _safeWatchAuthorizationRequired.value = false
+        }
+        return allowed
+    }
+
+    fun dismissSafeWatchAuthorizationRequest() {
+        pendingSafeWatchAuthorizationAction = null
+        pendingSafeWatchAuthorizationMediaId = null
+        _safeWatchAuthorizationRequired.value = false
+    }
+
+    fun verifySafeWatchParentPin(pin: String, onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
+            val verified = safeApp?.securityManager?.verifyParentPin(pin) == true
+            _safeWatchAuthorizationRequired.value = !verified
+            if (verified) {
+                val retry = pendingSafeWatchAuthorizationAction
+                val requestedForMediaId = pendingSafeWatchAuthorizationMediaId
+                pendingSafeWatchAuthorizationAction = null
+                pendingSafeWatchAuthorizationMediaId = null
+                onResult(true)
+                if (requestedForMediaId == currentMediaId) retry?.invoke()
+            } else {
+                onResult(false)
+            }
+        }
+    }
+
+    fun setActiveSafeWatchProfile(profile: SafeWatchProfile) {
+        if (profile == _activeSafeWatchProfile.value) return
+        viewModelScope.launch {
+            if (!canManageSafeWatch { setActiveSafeWatchProfile(profile) }) return@launch
+            safeWatchPreferences.edit().putString("active_profile", profile.key).apply()
+            _activeSafeWatchProfile.value = profile
+            _isSafeModeEnabled.value = safeWatchPreferences.getBoolean("safe_mode_${profile.key}", true)
+            evaluateSafeWatchRules(_currentPosition.value)
+        }
+    }
+
+    fun setSafeModeEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            // Enabling protection is always allowed; disabling it is parent-authorized when controls are on.
+            if (!enabled && !canManageSafeWatch { setSafeModeEnabled(enabled) }) return@launch
+            safeWatchPreferences.edit()
+                .putBoolean("safe_mode_${_activeSafeWatchProfile.value.key}", enabled)
+                .apply()
+            _isSafeModeEnabled.value = enabled
+            evaluateSafeWatchRules(_currentPosition.value)
+        }
+    }
+
+    fun saveSafeWatchRule(
+        draft: SafeWatchRuleDraft,
+        existingMarkerId: Int? = null,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            if (!canManageSafeWatch { saveSafeWatchRule(draft, existingMarkerId, onResult) }) {
+                onResult(false)
+                return@launch
+            }
+            val mediaId = currentMediaId
+            val media = _currentMedia.value
+            if (mediaId == null || mediaId <= 0 || media == null || media.id != mediaId || media.mediaType != MediaType.VIDEO) {
+                onResult(false)
+                return@launch
+            }
+            val durationMs = _duration.value.takeIf { it > 0L } ?: media.durationMs
+            if (!isValidSafeWatchInterval(draft.startMs, draft.endMs, durationMs) || !isValidSafeWatchProfileId(draft.profileId)) {
+                onResult(false)
+                return@launch
+            }
+
+            val previous = existingMarkerId?.let { id -> _markers.value.firstOrNull { it.id == id } }
+            if (existingMarkerId != null && (previous == null || !previous.isSafeWatchRelated())) {
+                onResult(false)
+                return@launch
+            }
             val marker = com.example.data.TimelineMarker(
+                id = previous?.id ?: 0,
                 mediaId = mediaId,
-                timeMs = startMs,
-                name = title,
-                description = validEnd.toString(),
-                type = ruleType // SAFE_SKIP, SAFE_MUTE, SAFE_BLUR
+                timeMs = draft.startMs,
+                name = draft.name.trim().take(100).ifBlank { "${draft.category.label} • ${formatTimeDisplay(draft.startMs)}" },
+                type = draft.action.markerType,
+                createdAt = previous?.createdAt ?: System.currentTimeMillis(),
+                endTimeMs = draft.endMs,
+                category = draft.category.key,
+                action = draft.action.key,
+                profileId = draft.profileId,
+                confidence = draft.confidence?.takeIf { it.isFinite() }?.coerceIn(0f, 1f),
+                source = draft.source,
+                reviewStatus = SAFE_WATCH_ACCEPTED
             )
-            repository.insertMarker(marker)
+            if (previous == null) repository.insertMarker(marker) else repository.updateMarker(marker)
+            enableSafeWatchForProfile(draft.profileId)
+            evaluateSafeWatchRules(_currentPosition.value)
+            onResult(true)
+        }
+    }
+
+    fun rejectSafeWatchSuggestion(markerId: Int) {
+        viewModelScope.launch {
+            if (!canManageSafeWatch { rejectSafeWatchSuggestion(markerId) }) return@launch
+            val suggestion = _markers.value.firstOrNull { it.id == markerId && it.isSafeWatchSuggestion() } ?: return@launch
+            repository.updateMarker(suggestion.copy(reviewStatus = SAFE_WATCH_REJECTED))
+        }
+    }
+
+    fun skipCurrentSafeWatchSegment() {
+        val position = _currentPosition.value
+        val activeEndMs = _markers.value.asSequence()
+            .filter { marker ->
+                marker.isSafeWatchRule() && marker.appliesToSafetyProfile(_activeSafeWatchProfile.value) &&
+                    position >= marker.timeMs && position < marker.safeWatchEndTimeMs()
+            }
+            .map { it.safeWatchEndTimeMs() }
+            .maxOrNull()
+        if (activeEndMs == null) seekRelative(5_000L) else seekTo(activeEndMs)
+    }
+
+    private fun isValidSafeWatchProfileId(profileId: String): Boolean =
+        profileId == SAFE_WATCH_ALL_PROFILES || SafeWatchProfile.entries.any { it.key == profileId }
+
+    private fun enableSafeWatchForProfile(profileId: String) {
+        val profiles = if (profileId == SAFE_WATCH_ALL_PROFILES) {
+            SafeWatchProfile.entries
+        } else {
+            SafeWatchProfile.entries.filter { it.key == profileId }
+        }
+        if (profiles.isEmpty()) return
+        val editor = safeWatchPreferences.edit()
+        profiles.forEach { profile -> editor.putBoolean("safe_mode_${profile.key}", true) }
+        editor.apply()
+        if (profiles.any { it == _activeSafeWatchProfile.value }) {
             _isSafeModeEnabled.value = true
         }
     }
 
-    fun generateDemoAiSafeWatchRules() {
-        val mediaId = currentMediaId ?: return
-        val cur = _currentPosition.value
-        viewModelScope.launch {
-            val rules = listOf(
+    private suspend fun persistSafetySuggestions(
+        mediaId: Int,
+        source: String,
+        suggestions: List<com.example.safety.SubtitleSafetySuggestion>,
+        profile: SafeWatchProfile
+    ): Int {
+        val media = _currentMedia.value ?: return 0
+        if (currentMediaId != mediaId || media.id != mediaId || _activeSafeWatchProfile.value != profile) return 0
+        val durationMs = _duration.value.takeIf { it > 0L } ?: media.durationMs
+        repository.clearPendingSafetySuggestions(mediaId, source, profile.key)
+        if (currentMediaId != mediaId || _activeSafeWatchProfile.value != profile || suggestions.isEmpty()) return 0
+
+        val mediaMarkers = try {
+            repository.getMarkersForMedia(mediaId).first()
+        } catch (_: Exception) {
+            _markers.value.filter { it.mediaId == mediaId }
+        }
+        if (currentMediaId != mediaId || _activeSafeWatchProfile.value != profile) return 0
+        val reviewed = mediaMarkers.filter { marker ->
+            marker.category != null && marker.appliesToSafetyProfile(profile) &&
+                (marker.reviewStatus == SAFE_WATCH_ACCEPTED ||
+                    (marker.type == "SAFE_SUGGESTION" && marker.reviewStatus == SAFE_WATCH_REJECTED && marker.source == source))
+        }
+        val addedIntervals = mutableListOf<Triple<SafeWatchCategory, Long, Long>>()
+        var added = 0
+        for (suggestion in suggestions.take(1_000)) {
+            if (currentMediaId != mediaId || _activeSafeWatchProfile.value != profile) return added
+            val startMs = suggestion.startMs.coerceAtLeast(0L)
+            val endMs = if (durationMs > 0L) suggestion.endMs.coerceAtMost(durationMs) else suggestion.endMs
+            if (!isValidSafeWatchInterval(startMs, endMs, durationMs)) continue
+            val alreadyReviewed = reviewed.any { existing ->
+                existing.category == suggestion.category.key &&
+                    startMs < existing.safeWatchEndTimeMs() && endMs > existing.timeMs
+            }
+            val alreadySuggested = addedIntervals.any { (category, start, end) ->
+                category == suggestion.category && startMs < end && endMs > start
+            }
+            if (alreadyReviewed || alreadySuggested) continue
+            val confidence = suggestion.confidence.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f
+            repository.insertMarker(
                 com.example.data.TimelineMarker(
                     mediaId = mediaId,
-                    timeMs = cur + 2000L,
-                    name = "تخطي تلقائي لمشهد غير ملائم",
-                    description = (cur + 7000L).toString(),
-                    type = "SAFE_SKIP"
-                ),
-                com.example.data.TimelineMarker(
-                    mediaId = mediaId,
-                    timeMs = cur + 10000L,
-                    name = "كتم صوت تلقائي لكلمات غير لائقة",
-                    description = (cur + 15000L).toString(),
-                    type = "SAFE_MUTE"
-                ),
-                com.example.data.TimelineMarker(
-                    mediaId = mediaId,
-                    timeMs = cur + 18000L,
-                    name = "تعتيم بصري لمشهد حساس",
-                    description = (cur + 23000L).toString(),
-                    type = "SAFE_BLUR"
+                    timeMs = startMs,
+                    name = suggestion.reason.take(100),
+                    type = "SAFE_SUGGESTION",
+                    endTimeMs = endMs,
+                    category = suggestion.category.key,
+                    action = suggestion.category.suggestedAction.key,
+                    profileId = profile.key,
+                    confidence = confidence,
+                    source = source,
+                    reviewStatus = SAFE_WATCH_PENDING
                 )
             )
-            rules.forEach { repository.insertMarker(it) }
-            _isSafeModeEnabled.value = true
+            addedIntervals += Triple(suggestion.category, startMs, endMs)
+            added++
         }
+        return added
     }
 
-    fun exportSafeWatchRulesJson(): String {
-        val safeMarkers = _markers.value.filter { it.type.startsWith("SAFE_") }
-        val root = JSONObject()
-        root.put("app", "SafePlayer")
-        root.put("version", 1)
-        root.put("mediaName", _currentMedia.value?.name ?: "video")
-        val arr = JSONArray()
-        safeMarkers.forEach { m ->
-            val obj = JSONObject()
-            obj.put("startMs", m.timeMs)
-            obj.put("endMs", m.description?.toLongOrNull() ?: (m.timeMs + 5000L))
-            obj.put("type", m.type)
-            obj.put("name", m.name ?: "قاعدة حماية")
-            arr.put(obj)
-        }
-        root.put("rules", arr)
-        return root.toString(2)
-    }
-
-    fun importSafeWatchRulesJson(rawJson: String, onResult: (Boolean, Int) -> Unit) {
+    fun analyzeLoadedSubtitlesForSafety(onResult: (Int) -> Unit) {
         val mediaId = currentMediaId
-        if (mediaId == null) {
-            onResult(false, 0)
+        if (mediaId == null || mediaId <= 0 || _subtitleCues.value.isEmpty()) {
+            onResult(0)
+            return
+        }
+        val cuesSnapshot = _subtitleCues.value.toList()
+        viewModelScope.launch {
+            if (!canManageSafeWatch { analyzeLoadedSubtitlesForSafety(onResult) }) {
+                onResult(0)
+                return@launch
+            }
+            val profile = _activeSafeWatchProfile.value
+            val suggestions = withContext(Dispatchers.Default) {
+                SubtitleSafetyAnalyzer.analyze(cuesSnapshot.map { TimedSafetyText(it.startMs, it.endMs, it.text) })
+            }
+            if (currentMediaId != mediaId || _activeSafeWatchProfile.value != profile) {
+                onResult(0)
+                return@launch
+            }
+            onResult(persistSafetySuggestions(mediaId, "SUBTITLE_KEYWORD", suggestions, profile))
+        }
+    }
+
+    fun createVisualSafetySuggestions(onResult: (Int) -> Unit) {
+        val mediaId = currentMediaId
+        if (mediaId == null || mediaId <= 0 || _currentMedia.value?.mediaType != MediaType.VIDEO) {
+            onResult(0)
             return
         }
         viewModelScope.launch {
-            try {
-                val root = JSONObject(rawJson.trim())
-                val arr = root.getJSONArray("rules")
-                var count = 0
-                for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
-                    val startMs = obj.optLong("startMs", -1L)
-                    val endMs = obj.optLong("endMs", startMs + 5000L)
-                    val type = obj.optString("type", "SAFE_SKIP")
-                    val name = obj.optString("name", "قاعدة مستوردة")
-                    if (startMs >= 0L) {
-                        repository.insertMarker(
-                            com.example.data.TimelineMarker(
-                                mediaId = mediaId,
-                                timeMs = startMs,
-                                name = name,
-                                description = endMs.toString(),
-                                type = type
-                            )
-                        )
-                        count++
-                    }
-                }
-                _isSafeModeEnabled.value = true
-                onResult(count > 0, count)
+            if (!canManageSafeWatch { createVisualSafetySuggestions(onResult) }) {
+                onResult(0)
+                return@launch
+            }
+            val profile = _activeSafeWatchProfile.value
+            val detections = try {
+                repository.getDetectionResultsForMedia(mediaId).first()
             } catch (_: Exception) {
-                onResult(false, 0)
+                emptyList()
+            }
+            val suggestions = detections.asSequence()
+                .filter { it.status != "REJECTED" && it.modality.equals("VISUAL", ignoreCase = true) }
+                .mapNotNull { result ->
+                    val category = when {
+                        result.category.contains(Regex("violence|blood|weapon|gun|fight", RegexOption.IGNORE_CASE)) -> SafeWatchCategory.VIOLENCE
+                        result.category.contains(Regex("skin|flesh|underwear|undergarment|swimwear|nudity", RegexOption.IGNORE_CASE)) -> SafeWatchCategory.ADULT
+                        else -> null
+                    } ?: return@mapNotNull null
+                    com.example.safety.SubtitleSafetySuggestion(
+                        startMs = (result.startTimeMs - 1_000L).coerceAtLeast(0L),
+                        endMs = maxOf(result.endTimeMs, result.startTimeMs) + 1_000L,
+                        category = category,
+                        confidence = result.confidence,
+                        reason = "اقتراح من الفحص البصري المحلي: ${result.category.take(40)}"
+                    )
+                }
+                .toList()
+            if (currentMediaId != mediaId || _activeSafeWatchProfile.value != profile) {
+                onResult(0)
+                return@launch
+            }
+            onResult(persistSafetySuggestions(mediaId, "LOCAL_VISUAL_AI", suggestions, profile))
+        }
+    }
+
+    fun exportSafeWatchRulesJson(onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            if (!canManageSafeWatch { exportSafeWatchRulesJson(onResult) }) {
+                onResult(null)
+                return@launch
+            }
+            val media = _currentMedia.value
+            val mediaId = currentMediaId
+            if (media == null || media.mediaType != MediaType.VIDEO || mediaId == null || mediaId <= 0 || media.id != mediaId) {
+                onResult(null)
+                return@launch
+            }
+            val markersForMedia = try {
+                repository.getMarkersForMedia(mediaId).first()
+            } catch (_: Exception) {
+                _markers.value.filter { it.mediaId == mediaId }
+            }
+            if (currentMediaId != mediaId || _currentMedia.value?.let { safetyMediaFingerprint(it) } != safetyMediaFingerprint(media)) {
+                onResult(null)
+                return@launch
+            }
+            val safeRules = markersForMedia.filter { it.isSafeWatchRule() }
+            if (safeRules.isEmpty() || safeRules.size > 500) {
+                onResult(null)
+                return@launch
+            }
+            val root = JSONObject().apply {
+                put("app", "SafePlayer")
+                put("version", 2)
+                put("mediaName", media.name)
+                put("mediaFingerprint", safetyMediaFingerprint(media))
+                put("rules", JSONArray().apply {
+                    safeRules.sortedBy { it.timeMs }.forEach { marker ->
+                        val action = marker.safeWatchAction() ?: return@forEach
+                        put(JSONObject().apply {
+                            put("startMs", marker.timeMs)
+                            put("endMs", marker.safeWatchEndTimeMs())
+                            put("action", action.key)
+                            put("category", SafeWatchCategory.fromKey(marker.category)?.key ?: SafeWatchCategory.CUSTOM.key)
+                            put("profileId", marker.profileId ?: SAFE_WATCH_ALL_PROFILES)
+                            put("name", marker.name ?: "قاعدة حماية")
+                            put("source", marker.source ?: "MANUAL")
+                            marker.confidence?.takeIf { it.isFinite() && it in 0f..1f }?.let { put("confidence", it) }
+                        })
+                    }
+                })
+            }
+            onResult(root.toString(2))
+        }
+    }
+
+    fun previewSafeWatchRulesJson(rawJson: String): SafeWatchImportPreview {
+        val media = _currentMedia.value ?: return SafeWatchImportPreview(error = "لا يوجد فيديو مفتوح حالياً")
+        if (media.mediaType != MediaType.VIDEO) return SafeWatchImportPreview(error = "قواعد الحماية متاحة للفيديوهات فقط")
+        if (media.id <= 0) return SafeWatchImportPreview(error = "استيراد القواعد متاح للفيديوهات المحلية فقط")
+        if (currentMediaId != media.id) return SafeWatchImportPreview(error = "تغيّر الفيديو الحالي؛ أعد فتح المعاينة")
+        if (rawJson.length > 1_000_000) return SafeWatchImportPreview(error = "حجم ملف الحماية أكبر من الحد المسموح")
+        if (hasExcessiveSafetyJsonNesting(rawJson)) return SafeWatchImportPreview(error = "بنية JSON أعمق من الحد المسموح")
+        return try {
+            val root = JSONObject(rawJson.trim())
+            if (root.optString("app") != "SafePlayer") return SafeWatchImportPreview(error = "الملف ليس حزمة حماية من SafePlayer")
+            val version = root.optInt("version", 1)
+            if (version !in 1..2) return SafeWatchImportPreview(error = "إصدار ملف الحماية غير مدعوم")
+            if (version >= 2) {
+                if (root.optString("mediaFingerprint") != safetyMediaFingerprint(media)) {
+                    return SafeWatchImportPreview(error = "بصمة بيانات الملف لا تطابق الفيديو المفتوح؛ لم تُطبّق أي قاعدة")
+                }
+            } else if (!root.optString("mediaName").trim().equals(media.name.trim(), ignoreCase = true)) {
+                return SafeWatchImportPreview(error = "اسم الفيديو في الملف القديم لا يطابق الفيديو المفتوح")
+            }
+
+            val arr = root.optJSONArray("rules") ?: return SafeWatchImportPreview(error = "لا توجد قائمة قواعد صالحة في الملف")
+            if (arr.length() == 0 || arr.length() > 500) {
+                return SafeWatchImportPreview(error = "يجب أن يحتوي الملف على قاعدة واحدة إلى 500 قاعدة")
+            }
+            val durationMs = _duration.value.takeIf { it > 0L } ?: media.durationMs
+            val drafts = LinkedHashMap<String, SafeWatchRuleDraft>()
+            for (index in 0 until arr.length()) {
+                val item = arr.optJSONObject(index) ?: return SafeWatchImportPreview(error = "القاعدة رقم ${index + 1} غير صالحة")
+                val startMs = item.optLong("startMs", -1L)
+                val legacyEndDefault = if (version == 1 && startMs >= 0L && startMs <= Long.MAX_VALUE - 5_000L) {
+                    startMs + 5_000L
+                } else {
+                    -1L
+                }
+                val endMs = item.optLong("endMs", legacyEndDefault)
+                val action = SafeWatchAction.fromKey(item.optString("action", item.optString("type", "")))
+                    ?: return SafeWatchImportPreview(error = "إجراء غير معروف في القاعدة رقم ${index + 1}")
+                val category = SafeWatchCategory.fromKey(item.optString("category", SafeWatchCategory.CUSTOM.key))
+                    ?: return SafeWatchImportPreview(error = "تصنيف غير معروف في القاعدة رقم ${index + 1}")
+                val rawProfileId = item.optString("profileId", SAFE_WATCH_ALL_PROFILES).trim()
+                val profileId = if (rawProfileId.isBlank() || rawProfileId.equals(SAFE_WATCH_ALL_PROFILES, ignoreCase = true)) {
+                    SAFE_WATCH_ALL_PROFILES
+                } else {
+                    rawProfileId.uppercase(Locale.ROOT)
+                }
+                if (!isValidSafeWatchProfileId(profileId)) return SafeWatchImportPreview(error = "ملف عائلي غير معروف في القاعدة رقم ${index + 1}")
+                if (!isValidSafeWatchInterval(startMs, endMs, durationMs)) {
+                    return SafeWatchImportPreview(error = "توقيت القاعدة رقم ${index + 1} خارج مدة الفيديو أو غير صحيح")
+                }
+                val confidence = if (item.has("confidence") && !item.isNull("confidence")) {
+                    val value = item.optDouble("confidence", Double.NaN)
+                    if (!value.isFinite() || value !in 0.0..1.0) {
+                        return SafeWatchImportPreview(error = "قيمة الثقة غير صالحة في القاعدة رقم ${index + 1}")
+                    }
+                    value.toFloat()
+                } else null
+                val name = item.optString("name", "قاعدة مستوردة")
+                    .filterNot { it.code < 0x20 || it.code in 0x7f..0x9f }
+                    .take(100)
+                    .ifBlank { "قاعدة مستوردة" }
+                val draft = SafeWatchRuleDraft(
+                    startMs = startMs,
+                    endMs = endMs,
+                    action = action,
+                    category = category,
+                    profileId = profileId,
+                    name = name,
+                    confidence = confidence,
+                    source = "IMPORTED"
+                )
+                val key = "${draft.startMs}:${draft.endMs}:${draft.action.key}:${draft.category.key}:${draft.profileId}"
+                drafts[key] = draft
+            }
+            SafeWatchImportPreview(
+                rules = drafts.values.toList(),
+                mediaId = media.id,
+                mediaFingerprint = safetyMediaFingerprint(media)
+            )
+        } catch (_: Exception) {
+            SafeWatchImportPreview(error = "تعذر قراءة ملف الحماية؛ تحقق من صحة JSON")
+        }
+    }
+
+    fun importSafeWatchRules(preview: SafeWatchImportPreview, onResult: (Boolean, Int) -> Unit) {
+        viewModelScope.launch {
+            safeWatchImportMutex.withLock {
+                if (!preview.canApply || preview.rules.size > 500 ||
+                    !canManageSafeWatch { importSafeWatchRules(preview, onResult) }
+                ) {
+                    onResult(false, 0)
+                    return@withLock
+                }
+
+                val media = _currentMedia.value
+                val mediaId = currentMediaId
+                if (media == null || media.mediaType != MediaType.VIDEO || mediaId == null || mediaId <= 0 ||
+                    media.id != mediaId || preview.mediaId != mediaId ||
+                    preview.mediaFingerprint != safetyMediaFingerprint(media)
+                ) {
+                    onResult(false, 0)
+                    return@withLock
+                }
+
+                val durationMs = _duration.value.takeIf { it > 0L } ?: media.durationMs
+                val markersForMedia = (try {
+                    repository.getMarkersForMedia(mediaId).first()
+                } catch (_: Exception) {
+                    _markers.value.filter { it.mediaId == mediaId }
+                }).toMutableList()
+                if (currentMediaId != mediaId ||
+                    _currentMedia.value?.let { safetyMediaFingerprint(it) } != preview.mediaFingerprint
+                ) {
+                    onResult(false, 0)
+                    return@withLock
+                }
+                var imported = 0
+                val importedProfiles = linkedSetOf<String>()
+
+                for (draft in preview.rules) {
+                    if (!isValidSafeWatchInterval(draft.startMs, draft.endMs, durationMs) ||
+                        !isValidSafeWatchProfileId(draft.profileId)
+                    ) continue
+
+                    val matchingScopes = markersForMedia.asSequence()
+                        .filter { existing ->
+                            existing.isSafeWatchRule() && existing.timeMs == draft.startMs &&
+                                existing.safeWatchEndTimeMs() == draft.endMs &&
+                                existing.safeWatchAction() == draft.action && existing.category == draft.category.key
+                        }
+                        .map { existing -> existing.profileId.takeUnless { it.isNullOrBlank() } ?: SAFE_WATCH_ALL_PROFILES }
+                        .toSet()
+                    val duplicate = if (draft.profileId == SAFE_WATCH_ALL_PROFILES) {
+                        SAFE_WATCH_ALL_PROFILES in matchingScopes || SafeWatchProfile.entries.all { it.key in matchingScopes }
+                    } else {
+                        SAFE_WATCH_ALL_PROFILES in matchingScopes || draft.profileId in matchingScopes
+                    }
+                    if (duplicate) continue
+
+                    val importedMarker = com.example.data.TimelineMarker(
+                        mediaId = mediaId,
+                        timeMs = draft.startMs,
+                        name = draft.name,
+                        type = draft.action.markerType,
+                        endTimeMs = draft.endMs,
+                        category = draft.category.key,
+                        action = draft.action.key,
+                        profileId = draft.profileId,
+                        confidence = draft.confidence?.coerceIn(0f, 1f),
+                        source = "IMPORTED",
+                        reviewStatus = SAFE_WATCH_ACCEPTED
+                    )
+                    repository.insertMarker(importedMarker)
+                    markersForMedia += importedMarker
+                    imported++
+                    importedProfiles += draft.profileId
+                }
+
+                if (imported > 0) {
+                    importedProfiles.forEach(::enableSafeWatchForProfile)
+                    evaluateSafeWatchRules(_currentPosition.value)
+                }
+                onResult(imported > 0, imported)
             }
         }
+    }
+
+    private fun safetyMediaFingerprint(media: com.example.data.MediaItem): String {
+        val input = "${media.name.trim().lowercase(Locale.ROOT)}|${media.sizeBytes}|${media.durationMs}|${media.mediaType.name}"
+        val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
+        return digest.take(16).joinToString("") { byte -> "%02x".format(Locale.ROOT, byte.toInt() and 0xff) }
+    }
+
+    private fun hasExcessiveSafetyJsonNesting(json: String): Boolean {
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for (character in json) {
+            if (inString) {
+                when {
+                    escaped -> escaped = false
+                    character == '\\' -> escaped = true
+                    character == '"' -> inString = false
+                }
+            } else {
+                when (character) {
+                    '"' -> inString = true
+                    '{', '[' -> {
+                        depth++
+                        if (depth > 64) return true
+                    }
+                    '}', ']' -> depth--
+                }
+            }
+        }
+        return false
     }
 
     fun toggleVideoBgPlay(): Boolean {
@@ -1215,6 +1688,8 @@ class PlayerViewModel(
 
     fun removeMarker(markerId: Int) {
         viewModelScope.launch {
+            val marker = _markers.value.firstOrNull { it.id == markerId } ?: return@launch
+            if (marker.isSafeWatchRelated() && !canManageSafeWatch { removeMarker(markerId) }) return@launch
             repository.deleteMarker(markerId)
         }
     }
