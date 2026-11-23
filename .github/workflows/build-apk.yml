@@ -55,17 +55,22 @@ jobs:
           gradle :app:testDebugUnitTest :app:lintDebug --no-daemon --stacktrace 2>&1 | tee "$log_file"
           gradle_status=${PIPESTATUS[0]}
           if [[ "$gradle_status" -ne 0 ]]; then
-            diagnostics="$(tail -n 100 "$log_file")"
-            diagnostics="${diagnostics//'%'/'%25'}"
-            diagnostics="${diagnostics//$'\r'/'%0D'}"
-            diagnostics="${diagnostics//$'\n'/'%0A'}"
-            echo "::error title=Gradle test/lint diagnostics::$diagnostics"
+            mapfile -t diagnostic_lines < <(
+              grep -E '^(e: |w: |error:|FAILURE:|.*What went wrong:|Execution failed for task|> Task .*FAILED|> |Caused by:|BUILD FAILED|[0-9]+ tests? (completed|failed))' "$log_file" | tail -n 50
+            )
+            if [[ "${#diagnostic_lines[@]}" -eq 0 ]]; then
+              mapfile -t diagnostic_lines < <(tail -n 20 "$log_file")
+            fi
             {
               echo "### Gradle test/lint diagnostics"
               echo '```text'
-              tail -n 100 "$log_file"
+              printf '%s\n' "${diagnostic_lines[@]}"
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
+            for line in "${diagnostic_lines[@]}"; do
+              escaped="${line//'%'/'%25'}"
+              echo "::error title=Gradle test/lint diagnostic::$escaped"
+            done
           fi
           exit "$gradle_status"
 
