@@ -14,6 +14,9 @@ interface SecurityDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveSecurityConfig(config: SecurityConfig)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertDefaultSecurityConfig(config: SecurityConfig): Long
+
     // Protected Items
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun protectItem(item: ProtectedItem)

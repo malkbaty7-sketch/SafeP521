@@ -13,6 +13,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -26,6 +29,7 @@ fun AppLockOverlay(
 ) {
     val config by securityManager.securityConfig.collectAsStateWithLifecycle(initialValue = null)
     val isUnlocked by securityManager.isUnlocked.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     var enteredPin by remember { mutableStateOf("") }
@@ -82,22 +86,14 @@ fun AppLockOverlay(
                     OutlinedTextField(
                         value = enteredPin,
                         onValueChange = {
-                            if (it.length <= 6) {
+                            if (it.length <= 6 && it.all { digit -> digit in '0'..'9' }) {
                                 enteredPin = it
                                 errorText = null
-                                if (it.length >= 4) {
-                                    scope.launch {
-                                        val success = securityManager.verifyAppPin(it)
-                                        if (success) {
-                                            enteredPin = ""
-                                            onUnlocked()
-                                        }
-                                    }
-                                }
                             }
                         },
                         label = { Text("الرمز السري (PIN)") },
                         visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                         singleLine = true,
                         isError = errorText != null,
                         modifier = Modifier.fillMaxWidth()
@@ -115,8 +111,21 @@ fun AppLockOverlay(
                         if (config?.isBiometricEnabled == true) {
                             FilledTonalIconButton(
                                 onClick = {
-                                    securityManager.unlockWithBiometrics()
-                                    onUnlocked()
+                                    val activity = context.findFragmentActivity()
+                                    if (activity == null) {
+                                        errorText = "تعذر بدء المصادقة الحيوية داخل هذا النشاط"
+                                    } else {
+                                        requestBiometricUnlock(
+                                            activity = activity,
+                                            title = "فتح SafePlayer",
+                                            subtitle = "تحقق من هويتك لفتح التطبيق والخزنة",
+                                            onAuthenticated = {
+                                                securityManager.onBiometricAuthSucceeded()
+                                                onUnlocked()
+                                            },
+                                            onError = { errorText = it }
+                                        )
+                                    }
                                 },
                                 modifier = Modifier.size(48.dp)
                             ) {

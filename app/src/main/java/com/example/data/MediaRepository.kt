@@ -103,17 +103,6 @@ class MediaRepository(private val mediaDao: MediaDao) {
         mediaDao.updateDetectionResultStatus(resultId, status)
     }
     
-    // --- Processing Jobs ---
-    val allProcessingJobs: Flow<List<com.example.processing.ProcessingJob>> = mediaDao.getAllProcessingJobs()
-    
-    suspend fun getActiveProcessingJobs() = mediaDao.getActiveProcessingJobs()
-    
-    suspend fun insertProcessingJob(job: com.example.processing.ProcessingJob): Long = mediaDao.insertProcessingJob(job)
-    
-    suspend fun updateProcessingJob(job: com.example.processing.ProcessingJob) = mediaDao.updateProcessingJob(job)
-    
-    suspend fun getProcessingJobById(id: Int) = mediaDao.getProcessingJobById(id)
-
     // --- Timeline Markers ---
     fun getMarkersForMedia(mediaId: Int): Flow<List<TimelineMarker>> = mediaDao.getMarkersForMedia(mediaId)
     

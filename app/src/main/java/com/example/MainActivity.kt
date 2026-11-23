@@ -1,12 +1,14 @@
 package com.example
 
 import android.content.Context
+import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.os.LocaleList
-import androidx.activity.ComponentActivity
+import android.widget.Toast
 import androidx.activity.compose.setContent
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,11 +20,13 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.data.MediaType
+import com.example.security.SecurityAction
 import com.example.ui.HomeScreen
 import com.example.ui.LibraryScreen
 import com.example.ui.MainViewModel
@@ -35,7 +39,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     private val app by lazy { application as SafePlayerApp }
 
     override fun attachBaseContext(newBase: Context) {
@@ -49,7 +53,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        app.securityManager.checkAutoLock()
+        lifecycleScope.launch { app.securityManager.checkAutoLock() }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,7 +94,7 @@ class MainActivity : ComponentActivity() {
                         color = MaterialTheme.colorScheme.background
                     ) {
                     val mainViewModel: MainViewModel = viewModel(
-                        factory = MainViewModelFactory(app.repository, app.scanner)
+                        factory = MainViewModelFactory(app.repository, app.scanner, app.storageManager)
                     )
 
                     val playerViewModel: PlayerViewModel = viewModel(
@@ -124,6 +128,12 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
+                    LaunchedEffect(securityConfig?.isAppLockEnabled, isUnlocked) {
+                        if (securityConfig?.isAppLockEnabled == true && !isUnlocked) {
+                            playerViewModel.stopAndClearMedia()
+                        }
+                    }
+
                     val navController = rememberNavController()
 
                     Box(modifier = Modifier.fillMaxSize()) {
@@ -136,6 +146,30 @@ class MainActivity : ComponentActivity() {
                                     protectedMediaIds = protectedMediaIds,
                                     onNavigateToPlayer = { item ->
                                         navController.navigate("player/${item.id}")
+                                    },
+                                    onShareMedia = { item ->
+                                        scope.launch {
+                                            val canShare = app.securityManager.canPerformAction(SecurityAction.SHARE) &&
+                                                app.securityManager.canAccessMedia(item.id)
+                                            if (canShare) {
+                                                try {
+                                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                        type = item.mimeType ?: if (item.mediaType == MediaType.VIDEO) "video/*" else "audio/*"
+                                                        putExtra(Intent.EXTRA_STREAM, android.net.Uri.parse(item.path))
+                                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                    }
+                                                    this@MainActivity.startActivity(Intent.createChooser(shareIntent, "مشاركة الوسائط"))
+                                                } catch (_: Exception) {
+                                                    Toast.makeText(this@MainActivity, "تعذر مشاركة الملف", Toast.LENGTH_SHORT).show()
+                                                }
+                                            } else {
+                                                Toast.makeText(
+                                                    this@MainActivity,
+                                                    "المشاركة محظورة بسبب إعدادات الأمان",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
                                     },
                                     onNavigateToLibrary = { type ->
                                         navController.navigate("library/${type.name}")

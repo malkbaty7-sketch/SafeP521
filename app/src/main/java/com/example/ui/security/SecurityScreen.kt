@@ -20,6 +20,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,8 +65,10 @@ fun SecurityScreen(
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0 = Safe Vault, 1 = Security & Parental Settings
     var showPinSetupDialog by remember { mutableStateOf(false) }
+    var showDisableAppLockDialog by remember { mutableStateOf(false) }
     var showDecoyPinDialog by remember { mutableStateOf(false) }
     var showParentalSetupDialog by remember { mutableStateOf(false) }
+    var showDisableParentalControlDialog by remember { mutableStateOf(false) }
     var showParentAuthDialog by remember { mutableStateOf(false) }
     var showAddMediaToVaultSheet by remember { mutableStateOf(false) }
 
@@ -165,13 +169,14 @@ fun SecurityScreen(
                                 OutlinedTextField(
                                     value = vaultPinInput,
                                     onValueChange = {
-                                        if (it.length <= 6) {
+                                        if (it.length <= 6 && it.all { digit -> digit in '0'..'9' }) {
                                             vaultPinInput = it
                                             vaultPinError = null
                                         }
                                     },
                                     label = { Text("الرمز السري (PIN)") },
                                     visualTransformation = PasswordVisualTransformation(),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                                     singleLine = true,
                                     isError = vaultPinError != null,
                                     modifier = Modifier.fillMaxWidth()
@@ -189,8 +194,23 @@ fun SecurityScreen(
                                     if (config?.isBiometricEnabled == true) {
                                         FilledTonalButton(
                                             onClick = {
-                                                securityManager.unlockWithBiometrics()
-                                                Toast.makeText(context, "تم فتح الخزنة السرية بالبصمة 🔓", Toast.LENGTH_SHORT).show()
+                                                val activity = context.findFragmentActivity()
+                                                if (activity == null) {
+                                                    Toast.makeText(context, "تعذر بدء المصادقة الحيوية داخل هذا النشاط", Toast.LENGTH_LONG).show()
+                                                } else {
+                                                    requestBiometricUnlock(
+                                                        activity = activity,
+                                                        title = "فتح خزنة SafePlayer",
+                                                        subtitle = "تحقق من هويتك لفتح الخزنة السرية",
+                                                        onAuthenticated = {
+                                                            securityManager.onBiometricAuthSucceeded()
+                                                            Toast.makeText(context, "تم التحقق من الهوية بالبصمة 🔓", Toast.LENGTH_SHORT).show()
+                                                        },
+                                                        onError = { message ->
+                                                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                                        }
+                                                    )
+                                                }
                                             }
                                         ) {
                                             Icon(Icons.Default.Fingerprint, contentDescription = null)
@@ -359,9 +379,7 @@ fun SecurityScreen(
                                             if (enabled) {
                                                 showPinSetupDialog = true
                                             } else {
-                                                scope.launch {
-                                                    securityManager.disableAppLock("")
-                                                }
+                                                showDisableAppLockDialog = true
                                             }
                                         }
                                     )
@@ -383,8 +401,14 @@ fun SecurityScreen(
                                             checked = config?.isBiometricEnabled == true,
                                             onCheckedChange = { enabled ->
                                                 scope.launch {
-                                                    val curr = config ?: return@launch
-                                                    app.database.securityDao().saveSecurityConfig(curr.copy(isBiometricEnabled = enabled))
+                                                    val updated = securityManager.setBiometricEnabled(enabled)
+                                                    if (!updated) {
+                                                        Toast.makeText(
+                                                            context,
+                                                            if (enabled) "تعذر التفعيل: تحقق من تسجيل بصمة على الجهاز وصلاحيات الإعدادات" else "تعذر تحديث إعداد البصمة",
+                                                            Toast.LENGTH_LONG
+                                                        ).show()
+                                                    }
                                                 }
                                             }
                                         )
@@ -497,12 +521,7 @@ fun SecurityScreen(
                                             if (enabled) {
                                                 showParentalSetupDialog = true
                                             } else {
-                                                scope.launch {
-                                                    val curr = config ?: return@launch
-                                                    app.database.securityDao().saveSecurityConfig(
-                                                        curr.copy(isParentalControlEnabled = false, userRole = "OWNER")
-                                                    )
-                                                }
+                                                showDisableParentalControlDialog = true
                                             }
                                         }
                                     )
@@ -534,7 +553,10 @@ fun SecurityScreen(
 
                                     Spacer(Modifier.height(8.dp))
                                     OutlinedButton(
-                                        onClick = { showParentalSetupDialog = true },
+                                        onClick = {
+                                            if (isParentAuth) showParentalSetupDialog = true
+                                            else showParentAuthDialog = true
+                                        },
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Text("تخصيص القيود الأبوية والرمز السري")
@@ -630,8 +652,97 @@ fun SecurityScreen(
         }
     }
 
+    if (showDisableAppLockDialog) {
+        var currentPin by remember { mutableStateOf("") }
+        var error by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = { showDisableAppLockDialog = false },
+            title = { Text("تأكيد تعطيل قفل التطبيق") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("أدخل رمز PIN الحالي لتعطيل قفل التطبيق والخزنة. بعد التعطيل لن يطلب التطبيق الرمز لعرض العناصر المحمية.")
+                    OutlinedTextField(
+                        value = currentPin,
+                        onValueChange = {
+                            if (it.length <= 6 && it.all { digit -> digit in '0'..'9' }) currentPin = it
+                        },
+                        label = { Text("رمز PIN الحالي") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        singleLine = true,
+                        isError = error != null
+                    )
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    scope.launch {
+                        val disabled = securityManager.disableAppLock(currentPin)
+                        if (disabled) {
+                            showDisableAppLockDialog = false
+                            Toast.makeText(context, "تم تعطيل قفل التطبيق بعد التحقق من الرمز", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val remaining = securityManager.getLockoutRemainingSeconds()
+                            error = if (remaining > 0) "انتظر $remaining ثانية قبل المحاولة مجدداً" else "رمز PIN غير صحيح أو تعذر تعطيل القفل"
+                        }
+                    }
+                }) { Text("تعطيل القفل") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDisableAppLockDialog = false }) { Text("إلغاء") }
+            }
+        )
+    }
+
+    if (showDisableParentalControlDialog) {
+        var parentPin by remember { mutableStateOf("") }
+        var error by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = { showDisableParentalControlDialog = false },
+            title = { Text("تعطيل الرقابة الأبوية") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("أدخل رمز الوالدين لتأكيد تعطيل القيود.")
+                    OutlinedTextField(
+                        value = parentPin,
+                        onValueChange = {
+                            if (it.length <= 6 && it.all { digit -> digit in '0'..'9' }) parentPin = it
+                        },
+                        label = { Text("رمز الوالدين") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        singleLine = true,
+                        isError = error != null
+                    )
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    scope.launch {
+                        val disabled = securityManager.disableParentalControl(parentPin)
+                        if (disabled) {
+                            showDisableParentalControlDialog = false
+                            Toast.makeText(context, "تم تعطيل الرقابة الأبوية بعد التحقق", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val remaining = securityManager.getLockoutRemainingSeconds()
+                            error = if (remaining > 0) "انتظر $remaining ثانية قبل المحاولة مجدداً" else "رمز الوالدين غير صحيح"
+                        }
+                    }
+                }) { Text("تعطيل الرقابة") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDisableParentalControlDialog = false }) { Text("إلغاء") }
+            }
+        )
+    }
+
     // PIN Setup Dialog
     if (showPinSetupDialog) {
+        var currentPin by remember { mutableStateOf("") }
         var pin by remember { mutableStateOf("") }
         var confirmPin by remember { mutableStateOf("") }
         var error by remember { mutableStateOf<String?>(null) }
@@ -641,18 +752,34 @@ fun SecurityScreen(
             title = { Text("تعيين الرمز السري الحقيقي (PIN) 🔐", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (config?.isAppLockEnabled == true) {
+                        OutlinedTextField(
+                            value = currentPin,
+                            onValueChange = {
+                                if (it.length <= 6 && it.all { digit -> digit in '0'..'9' }) currentPin = it
+                            },
+                            label = { Text("رمز PIN الحالي") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            singleLine = true
+                        )
+                    }
                     OutlinedTextField(
                         value = pin,
-                        onValueChange = { if (it.length <= 6) pin = it },
+                        onValueChange = { if (it.length <= 6 && it.all { digit -> digit in '0'..'9' }) pin = it },
                         label = { Text("أدخل رمز PIN من 4 إلى 6 أرقام") },
                         visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                         singleLine = true
                     )
                     OutlinedTextField(
                         value = confirmPin,
-                        onValueChange = { if (it.length <= 6) confirmPin = it },
+                        onValueChange = {
+                            if (it.length <= 6 && it.all { digit -> digit in '0'..'9' }) confirmPin = it
+                        },
                         label = { Text("تأكيد رمز PIN") },
                         visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                         singleLine = true
                     )
                     error?.let {
@@ -668,9 +795,23 @@ fun SecurityScreen(
                         error = "الرمزان غير متطابقين"
                     } else {
                         scope.launch {
-                            securityManager.setupAppLock(pin, enableBiometric = true, autoLockSeconds = 60)
-                            showPinSetupDialog = false
-                            Toast.makeText(context, "تم تفعيل حماية الخزنة والتطبيق بنجاح 🔐", Toast.LENGTH_SHORT).show()
+                            val enableBiometric = if (config?.isAppLockEnabled == true) {
+                                config?.isBiometricEnabled == true
+                            } else {
+                                isBiometricUnlockAvailable(context)
+                            }
+                            val saved = securityManager.setupAppLock(
+                                pin = pin,
+                                enableBiometric = enableBiometric,
+                                autoLockSeconds = 60,
+                                currentPin = currentPin.takeIf { config?.isAppLockEnabled == true }
+                            )
+                            if (saved) {
+                                showPinSetupDialog = false
+                                Toast.makeText(context, "تم حفظ إعدادات القفل بنجاح 🔐", Toast.LENGTH_SHORT).show()
+                            } else {
+                                error = "تعذر الحفظ. تحقق من رمز PIN الحالي، وتأكد من اختلاف الرمز الجديد عن رمز التمويه."
+                            }
                         }
                     }
                 }) {
@@ -702,9 +843,12 @@ fun SecurityScreen(
                     )
                     OutlinedTextField(
                         value = decoyPin,
-                        onValueChange = { if (it.length <= 6) decoyPin = it },
+                        onValueChange = {
+                            if (it.length <= 6 && it.all { digit -> digit in '0'..'9' }) decoyPin = it
+                        },
                         label = { Text("رمز التمويه (4-6 أرقام مختلفة عن الرمز الأصلي)") },
                         visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                         singleLine = true
                     )
                     error?.let {
@@ -717,9 +861,15 @@ fun SecurityScreen(
                     if (decoyPin.length < 4) {
                         error = "يجب أن يتكون رمز التمويه من 4 أرقام على الأقل"
                     } else {
-                        securityManager.setupDecoyPin(decoyPin)
-                        showDecoyPinDialog = false
-                        Toast.makeText(context, "تم تفعيل رمز التمويه الذكي بنجاح 🕵️", Toast.LENGTH_SHORT).show()
+                        scope.launch {
+                            val saved = securityManager.setupDecoyPin(decoyPin)
+                            if (saved) {
+                                showDecoyPinDialog = false
+                                Toast.makeText(context, "تم تفعيل رمز التمويه الذكي بنجاح 🕵️", Toast.LENGTH_SHORT).show()
+                            } else {
+                                error = "تعذر حفظ الرمز. يجب أن يكون مختلفاً عن الرمز الحقيقي وأن يكون القفل مفعلاً."
+                            }
+                        }
                     }
                 }) {
                     Text("حفظ رمز التمويه")
@@ -729,9 +879,15 @@ fun SecurityScreen(
                 Row {
                     if (isDecoyConfigured) {
                         TextButton(onClick = {
-                            securityManager.setupDecoyPin(null)
-                            showDecoyPinDialog = false
-                            Toast.makeText(context, "تم إلغاء رمز التمويه", Toast.LENGTH_SHORT).show()
+                            scope.launch {
+                                val removed = securityManager.setupDecoyPin(null)
+                                if (removed) {
+                                    showDecoyPinDialog = false
+                                    Toast.makeText(context, "تم إلغاء رمز التمويه", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    error = "تعذر إزالة رمز التمويه"
+                                }
+                            }
                         }) {
                             Text("إزالة التمويه", color = MaterialTheme.colorScheme.error)
                         }
@@ -762,9 +918,12 @@ fun SecurityScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = parentPin,
-                        onValueChange = { if (it.length <= 6) parentPin = it },
+                        onValueChange = {
+                            if (it.length <= 6 && it.all { digit -> digit in '0'..'9' }) parentPin = it
+                        },
                         label = { Text("رمز الوالدين (4-6 أرقام)") },
                         visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                         singleLine = true
                     )
                     error?.let {
@@ -799,7 +958,7 @@ fun SecurityScreen(
                         error = "يجب أن يتكون الرمز من 4 أرقام على الأقل"
                     } else {
                         scope.launch {
-                            securityManager.setupParentalControl(
+                            val saved = securityManager.setupParentalControl(
                                 parentPin = parentPin,
                                 blockDelete = blockDelete,
                                 blockExport = blockExport,
@@ -808,7 +967,12 @@ fun SecurityScreen(
                                 blockAddSource = blockAddSource,
                                 blockSettings = blockSettings
                             )
-                            showParentalSetupDialog = false
+                            if (saved) {
+                                showParentalSetupDialog = false
+                                Toast.makeText(context, "تم حفظ إعدادات الرقابة الأبوية", Toast.LENGTH_SHORT).show()
+                            } else {
+                                error = "تعذر الحفظ. أدخل تصريح الوالدين وتأكد من اختلاف الرمز عن PIN التطبيق."
+                            }
                         }
                     }
                 }) {
@@ -836,9 +1000,12 @@ fun SecurityScreen(
                     Text("أدخل رمز الوالدين لفتح القيود:")
                     OutlinedTextField(
                         value = enteredPin,
-                        onValueChange = { if (it.length <= 6) enteredPin = it },
+                        onValueChange = {
+                            if (it.length <= 6 && it.all { digit -> digit in '0'..'9' }) enteredPin = it
+                        },
                         label = { Text("رمز الوالدين") },
                         visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                         singleLine = true
                     )
                     error?.let {

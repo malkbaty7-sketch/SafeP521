@@ -298,6 +298,7 @@ fun MediaDetailsScreen(
                         com.example.converter.VideoCompressor.compressVideo(
                             context = context,
                             repository = app.repository,
+                            securityManager = app.securityManager,
                             videoItem = mediaItem!!,
                             preset = selectedPreset
                         ) { success, _ ->
@@ -561,6 +562,7 @@ fun MediaDetailsScreen(
                                 val result = com.example.converter.AudioExtractor.extractAudio(
                                     context = context,
                                     repository = app.repository,
+                                    securityManager = app.securityManager,
                                     videoItem = media
                                 )
                                 if (result.isSuccess) {

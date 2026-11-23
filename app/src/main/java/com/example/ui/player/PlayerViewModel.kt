@@ -20,6 +20,7 @@ import androidx.media3.session.SessionToken
 import com.example.R
 import com.example.data.MediaRepository
 import com.example.data.WatchedState
+import com.example.security.SecurityAction
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicLong
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -207,6 +209,7 @@ class PlayerViewModel(
     }
 
     private val safeApp = application as? com.example.SafePlayerApp
+    private val mediaLoadRequestIds = AtomicLong(0L)
     private val _bookmarks = MutableStateFlow<List<com.example.bookmarks.VideoBookmark>>(emptyList())
     val bookmarks: StateFlow<List<com.example.bookmarks.VideoBookmark>> = _bookmarks.asStateFlow()
 
@@ -331,6 +334,22 @@ class PlayerViewModel(
     }
 
     fun loadMediaItem(dbItem: com.example.data.MediaItem, startMs: Long? = null) {
+        val requestId = mediaLoadRequestIds.incrementAndGet()
+        viewModelScope.launch {
+            val securityManager = safeApp?.securityManager
+            if (securityManager != null &&
+                (!securityManager.canPerformAction(SecurityAction.PLAY) ||
+                    !securityManager.canAccessMedia(dbItem.id))
+            ) {
+                if (requestId == mediaLoadRequestIds.get()) stopAndClearMedia()
+                return@launch
+            }
+            if (requestId != mediaLoadRequestIds.get()) return@launch
+            loadAuthorizedMediaItem(dbItem, startMs)
+        }
+    }
+
+    private fun loadAuthorizedMediaItem(dbItem: com.example.data.MediaItem, startMs: Long?) {
         val isSameMedia = currentMediaId == dbItem.id && player?.currentMediaItem != null
         _currentMedia.value = dbItem
         currentMediaId = dbItem.id
@@ -382,6 +401,7 @@ class PlayerViewModel(
     }
 
     fun stopAndClearMedia() {
+        mediaLoadRequestIds.incrementAndGet()
         savePosition(false)
         player?.pause()
         player?.clearMediaItems()

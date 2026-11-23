@@ -24,9 +24,12 @@ fun ExportDialog(
     onDismiss: () -> Unit
 ) {
     val tasks by viewModel.getTasksForProject(project.id).collectAsStateWithLifecycle(initialValue = emptyList())
+    val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
     var selectedQuality by remember { mutableStateOf("High") }
-    
-    val activeTask = tasks.firstOrNull { it.status == "PROCESSING" || it.status == "PREPARING" }
+
+    val activeTask = tasks.firstOrNull {
+        it.status in setOf("PREPARING", "PROCESSING", "VALIDATING", "FINALIZING")
+    }
     
     AlertDialog(
         onDismissRequest = {
@@ -35,6 +38,10 @@ fun ExportDialog(
         title = { Text("Export Project") },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
+                errorMessage?.let { message ->
+                    Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
                 if (activeTask != null) {
                     Text("Exporting... ${activeTask.progress}%")
                     LinearProgressIndicator(

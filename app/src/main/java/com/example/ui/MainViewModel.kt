@@ -7,6 +7,7 @@ import com.example.data.MediaItem
 import com.example.data.MediaRepository
 import com.example.data.WatchedState
 import com.example.scanner.MediaScanner
+import com.example.storage.StorageManager
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -15,7 +16,8 @@ import kotlinx.coroutines.launch
 
 class MainViewModel(
     private val repository: MediaRepository,
-    private val scanner: MediaScanner
+    private val scanner: MediaScanner,
+    private val storageManager: StorageManager
 ) : ViewModel() {
 
     val scanProgress = scanner.progress
@@ -64,21 +66,24 @@ class MainViewModel(
         }
     }
 
-    fun deleteMedia(item: MediaItem) {
+    fun deleteMedia(item: MediaItem, onResult: (Result<Unit>) -> Unit = {}) {
         viewModelScope.launch {
-            repository.deleteByPath(item.path)
+            val result = runCatching { storageManager.deleteMedia(item.id) }
+                .getOrElse { Result.failure(it) }
+            onResult(result)
         }
     }
 }
 
 class MainViewModelFactory(
     private val repository: MediaRepository,
-    private val scanner: MediaScanner
+    private val scanner: MediaScanner,
+    private val storageManager: StorageManager
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(MainViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return MainViewModel(repository, scanner) as T
+            return MainViewModel(repository, scanner, storageManager) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

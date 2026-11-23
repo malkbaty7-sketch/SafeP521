@@ -17,21 +17,27 @@ class ExportViewModel(
     private val exportEngine: ExportEngine,
     private val exportTaskDao: ExportTaskDao
 ) : ViewModel() {
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
-    fun getTasksForProject(projectId: Int): Flow<List<ExportTask>> {
-        return exportTaskDao.getTasksForProject(projectId)
-    }
+    fun getTasksForProject(projectId: Int): Flow<List<ExportTask>> =
+        exportTaskDao.getTasksForProject(projectId)
 
     fun startExport(project: EditingProject, operations: List<EditingOperation>, quality: String) {
         viewModelScope.launch {
-            exportEngine.startExport(
-                project = project,
-                operations = operations,
-                quality = quality
-            )
+            _errorMessage.value = null
+            try {
+                exportEngine.startExport(project = project, operations = operations, quality = quality)
+            } catch (error: Exception) {
+                _errorMessage.value = error.message ?: "Could not start export"
+            }
         }
     }
-    
+
+    fun clearError() {
+        _errorMessage.value = null
+    }
+
     fun cancelExport() {
         exportEngine.cancelCurrentExport()
     }
