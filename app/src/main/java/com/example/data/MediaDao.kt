@@ -28,6 +28,9 @@ interface MediaDao {
     @Query("SELECT * FROM media_items WHERE path = :path LIMIT 1")
     suspend fun getMediaByPath(path: String): MediaItem?
 
+    @Query("SELECT EXISTS(SELECT 1 FROM media_items WHERE path = :path AND id != :mediaId)")
+    suspend fun isPathReferencedByAnotherMedia(mediaId: Int, path: String): Boolean
+
     @Query("SELECT * FROM media_items WHERE id = :id")
     fun getMediaById(id: Int): Flow<MediaItem?>
 
