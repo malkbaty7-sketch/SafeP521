@@ -1,7 +1,4 @@
-@file:kotlin.OptIn(
-    androidx.media3.common.util.UnstableApi::class,
-    androidx.compose.material3.ExperimentalMaterial3Api::class
-)
+@file:kotlin.OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 
 package com.example.ui.player
 
@@ -89,6 +86,7 @@ import com.example.safety.safeWatchEndTimeMs
 import com.example.ui.glass.*
 import kotlinx.coroutines.delay
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun PlayerScreen(
     viewModel: PlayerViewModel,
