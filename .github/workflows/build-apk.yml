@@ -48,7 +48,26 @@ jobs:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
       - name: Run unit tests and lint
-        run: gradle :app:testDebugUnitTest :app:lintDebug --no-daemon --stacktrace
+        shell: bash
+        run: |
+          set +e
+          log_file="$RUNNER_TEMP/unit-tests-and-lint.log"
+          gradle :app:testDebugUnitTest :app:lintDebug --no-daemon --stacktrace 2>&1 | tee "$log_file"
+          gradle_status=${PIPESTATUS[0]}
+          if [[ "$gradle_status" -ne 0 ]]; then
+            diagnostics="$(tail -n 100 "$log_file")"
+            diagnostics="${diagnostics//'%'/'%25'}"
+            diagnostics="${diagnostics//$'\r'/'%0D'}"
+            diagnostics="${diagnostics//$'\n'/'%0A'}"
+            echo "::error title=Gradle test/lint diagnostics::$diagnostics"
+            {
+              echo "### Gradle test/lint diagnostics"
+              echo '```text'
+              tail -n 100 "$log_file"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$gradle_status"
 
       - name: Build debug APK
         run: gradle :app:assembleDebug --no-daemon --stacktrace
