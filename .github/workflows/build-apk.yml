@@ -75,6 +75,35 @@ jobs:
               escaped="${line//'%'/'%25'}"
               echo "::error title=Gradle test/lint diagnostic::$escaped"
             done
+            python3 - <<'PY'
+          import glob
+          import os
+          import xml.etree.ElementTree as ET
+
+          failures = []
+          for report in sorted(glob.glob("app/build/test-results/testDebugUnitTest/*.xml")):
+              try:
+                  root = ET.parse(report).getroot()
+              except ET.ParseError:
+                  continue
+              for case in root.iter("testcase"):
+                  for result in case:
+                      if result.tag not in ("failure", "error"):
+                          continue
+                      detail = result.attrib.get("message", "").strip() or (result.text or "").strip()
+                      detail = " ".join(detail.split())[:300]
+                      failures.append(f"{case.get('classname', 'test')}#{case.get('name', 'unknown')}: {detail or result.tag}")
+
+          if failures:
+              lines = [f"{len(failures)} failing unit test(s):", *failures[:15]]
+              message = "\n".join(lines)
+              if len(message) > 3_500:
+                  message = message[:3_500] + "\n... (truncated)"
+              escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=Unit test failures::{escaped}")
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                  summary.write("### Unit test failures\n```text\n" + message + "\n```\n")
+          PY
           fi
           exit "$gradle_status"
 
