@@ -8,6 +8,7 @@ import com.example.data.MediaItem
 import com.example.data.MediaType
 import com.example.security.SecurityManager
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.*
@@ -45,8 +46,8 @@ class StorageManagerTest {
     }
 
     @After
-    fun teardown() {
-        securityManager.close()
+    fun teardown() = runBlocking {
+        securityManager.closeAndJoin()
         database.close()
     }
 

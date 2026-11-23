@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
 import com.example.security.data.SecurityConfig
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -40,8 +41,8 @@ class SecurityManagerTest {
     }
 
     @After
-    fun tearDown() {
-        securityManager.close()
+    fun tearDown() = runBlocking {
+        securityManager.closeAndJoin()
         database.close()
     }
 
