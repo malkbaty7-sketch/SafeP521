@@ -6,6 +6,8 @@ import com.example.ai.DetectionResult
 import com.example.data.MediaItem
 import com.example.data.MediaRepository
 import com.example.data.Scene
+import com.example.security.SecurityAction
+import com.example.security.SecurityManager
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
@@ -16,13 +18,20 @@ import java.io.InputStreamReader
 
 class ScanDataManager(
     private val context: Context,
-    private val repository: MediaRepository
+    private val repository: MediaRepository,
+    private val securityManager: SecurityManager
 ) {
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val adapter = moshi.adapter(ScanDataPackage::class.java)
 
     suspend fun exportScanData(mediaItem: MediaItem, destUri: Uri): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            if (!securityManager.canPerformAction(SecurityAction.SHARE) ||
+                !securityManager.canPerformAction(SecurityAction.EXPORT) ||
+                !securityManager.canAccessMedia(mediaItem.id)
+            ) {
+                return@withContext Result.failure(SecurityException("Export is blocked by the current security policy"))
+            }
             val scenes = repository.getScenesForMedia(mediaItem.id).firstOrNull() ?: emptyList()
             val detections = repository.getDetectionResultsForMedia(mediaItem.id).firstOrNull() ?: emptyList()
             
@@ -56,6 +65,12 @@ class ScanDataManager(
                 }
             )
 
+            if (!securityManager.canPerformAction(SecurityAction.SHARE) ||
+                !securityManager.canPerformAction(SecurityAction.EXPORT) ||
+                !securityManager.canAccessMedia(mediaItem.id)
+            ) {
+                return@withContext Result.failure(SecurityException("Export permission changed while preparing scan data"))
+            }
             context.contentResolver.openOutputStream(destUri)?.use { output ->
                 OutputStreamWriter(output).use { writer ->
                     writer.write(adapter.toJson(pkg))
@@ -70,6 +85,11 @@ class ScanDataManager(
 
     suspend fun importScanData(mediaItem: MediaItem, sourceUri: Uri): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            if (!securityManager.canPerformAction(SecurityAction.ADD_SOURCE) ||
+                !securityManager.canAccessMedia(mediaItem.id)
+            ) {
+                return@withContext Result.failure(SecurityException("Import is blocked by the current security policy"))
+            }
             val json = context.contentResolver.openInputStream(sourceUri)?.use { input ->
                 InputStreamReader(input).readText()
             } ?: return@withContext Result.failure(Exception("Could not read source file"))
@@ -80,6 +100,12 @@ class ScanDataManager(
             val id = pkg.mediaIdentity
             if (id.sizeBytes != mediaItem.sizeBytes || id.durationMs != mediaItem.durationMs) {
                 return@withContext Result.failure(Exception("Source Verification Failed: The scan data does not match this media file."))
+            }
+
+            if (!securityManager.canPerformAction(SecurityAction.ADD_SOURCE) ||
+                !securityManager.canAccessMedia(mediaItem.id)
+            ) {
+                return@withContext Result.failure(SecurityException("Import permission changed while validating scan data"))
             }
 
             // Clear old data

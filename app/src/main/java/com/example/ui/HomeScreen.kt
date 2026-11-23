@@ -1,8 +1,6 @@
 package com.example.ui
 
 import android.Manifest
-import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.text.format.Formatter
 import android.widget.Toast
@@ -55,6 +53,7 @@ fun HomeScreen(
     playerViewModel: com.example.ui.player.PlayerViewModel? = null,
     protectedMediaIds: Set<Int> = emptySet(),
     onNavigateToPlayer: (MediaItem) -> Unit,
+    onShareMedia: (MediaItem) -> Unit = {},
     onNavigateToLibrary: (MediaType) -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToTaskCenter: () -> Unit = {},
@@ -1042,16 +1041,7 @@ fun HomeScreen(
                     leadingContent = { Icon(Icons.Default.Share, contentDescription = null) },
                     modifier = Modifier.clickable {
                         showMediaOptionsSheet = false
-                        try {
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = media.mimeType ?: if (media.mediaType == MediaType.VIDEO) "video/*" else "audio/*"
-                                putExtra(Intent.EXTRA_STREAM, Uri.parse(media.path))
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            context.startActivity(Intent.createChooser(shareIntent, "مشاركة الوسائط"))
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "تعذر مشاركة الملف", Toast.LENGTH_SHORT).show()
-                        }
+                        onShareMedia(media)
                     }
                 )
 
@@ -1061,8 +1051,11 @@ fun HomeScreen(
                     leadingContent = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
                     modifier = Modifier.clickable {
                         showMediaOptionsSheet = false
-                        viewModel.deleteMedia(media)
-                        Toast.makeText(context, "تم حذف الملف", Toast.LENGTH_SHORT).show()
+                        viewModel.deleteMedia(media) { result ->
+                            val message = if (result.isSuccess) "تم حذف الملف" else
+                                result.exceptionOrNull()?.message ?: "تعذر حذف الملف"
+                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                        }
                     }
                 )
                 Spacer(Modifier.height(16.dp))

@@ -18,7 +18,6 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Scene::class,
         com.example.ai.DetectionResult::class,
         com.example.modelmanager.AiModelEntity::class,
-        com.example.processing.ProcessingJob::class,
         TimelineMarker::class,
         EditingProject::class,
         EditingOperation::class,
@@ -31,7 +30,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         com.example.streaming.StreamChannel::class,
         com.example.bookmarks.VideoBookmark::class
     ], 
-    version = 12, 
+    version = 13,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -170,10 +169,17 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(database: SupportSQLiteDatabase) {
                 // Add stream_channels table
                 database.execSQL("CREATE TABLE IF NOT EXISTS `stream_channels` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `url` TEXT NOT NULL, `groupTitle` TEXT NOT NULL, `logoUrl` TEXT NOT NULL, `isFavorite` INTEGER NOT NULL, `addedAt` INTEGER NOT NULL)")
-                
+
                 // Add video_bookmarks table
                 database.execSQL("CREATE TABLE IF NOT EXISTS `video_bookmarks` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `mediaId` INTEGER NOT NULL, `timestampMs` INTEGER NOT NULL, `title` TEXT NOT NULL, `note` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, FOREIGN KEY(`mediaId`) REFERENCES `media_items`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)")
                 database.execSQL("CREATE INDEX IF NOT EXISTS `index_video_bookmarks_mediaId` ON `video_bookmarks` (`mediaId`)")
+            }
+        }
+
+        private val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE security_configs ADD COLUMN failedAttempts INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE security_configs ADD COLUMN lockoutUntilTimestamp INTEGER NOT NULL DEFAULT 0")
             }
         }
 
@@ -184,8 +190,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "safeplayer_database"
                 )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
-                .fallbackToDestructiveMigration()
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                 .build()
                 INSTANCE = instance
                 instance

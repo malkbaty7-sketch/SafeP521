@@ -1,333 +1,648 @@
 package com.example.streaming
 
 import android.content.Context
-import android.net.wifi.WifiManager
+import android.net.Uri
 import android.os.Environment
+import com.example.data.MediaItem
 import com.example.data.MediaRepository
-import com.sun.net.httpserver.HttpExchange
-import com.sun.net.httpserver.HttpHandler
-import com.sun.net.httpserver.HttpServer
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import com.example.security.SecurityAction
+import com.example.security.SecurityManager
+import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.launch
-import java.io.*
-import java.net.InetAddress
-import java.net.InetSocketAddress
+import kotlinx.coroutines.runBlocking
+import java.io.File
+import java.io.FileInputStream
+import java.io.FilterInputStream
+import java.io.IOException
+import java.io.InputStream
+import java.net.Inet4Address
 import java.net.NetworkInterface
-import java.net.URLDecoder
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.Collections
-import java.util.concurrent.Executors
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Semaphore
+import java.util.concurrent.atomic.AtomicLong
 
 class WifiShareServer(
     private val context: Context,
     private val repository: MediaRepository,
-    private val port: Int = 8080
+    private val securityManager: SecurityManager,
+    private val port: Int = DEFAULT_PORT
 ) {
-    private var server: HttpServer? = null
+    @Volatile
+    private var server: LocalHttpServer? = null
+
+    @Volatile
     var isRunning: Boolean = false
         private set
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    @Volatile
+    var pairingCode: String? = null
+        private set
 
+    private val sessions = ConcurrentHashMap<String, ClientSession>()
+    private val pairingAttempts = ConcurrentHashMap<String, PairingAttempt>()
+    private val random = SecureRandom()
+    private val uploadSemaphore = Semaphore(1)
+
+    @Synchronized
     fun start(onStatusChange: (Boolean, String) -> Unit) {
-        if (isRunning) return
+        if (isRunning) {
+            onStatusChange(true, "http://${getIpAddress()}:$port")
+            return
+        }
         try {
-            server = HttpServer.create(InetSocketAddress(port), 0).apply {
-                executor = Executors.newCachedThreadPool()
-
-                // Home Web Portal
-                createContext("/", HomeHandler())
-                // Media Streaming & Download Handler
-                createContext("/media", MediaStreamHandler())
-                // File Upload Handler
-                createContext("/upload", UploadHandler())
-
-                start()
-            }
-            isRunning = true
             val ip = getIpAddress()
-            val url = "http://$ip:$port"
-            onStatusChange(true, url)
-        } catch (e: Exception) {
+            require(ip != "127.0.0.1" && ip != "0.0.0.0") {
+                "اتصل بشبكة محلية قبل تشغيل المشاركة"
+            }
+            val nextServer = LocalHttpServer(ip)
+            nextServer.start(SOCKET_READ_TIMEOUT_MS, true)
+            server = nextServer
+            pairingCode = generatePairingCode()
+            sessions.clear()
+            pairingAttempts.clear()
+            isRunning = true
+            onStatusChange(true, "http://$ip:$port")
+        } catch (error: Exception) {
+            server?.stop()
+            server = null
+            pairingCode = null
             isRunning = false
-            onStatusChange(false, e.localizedMessage ?: "فشل بدء الخادم")
+            onStatusChange(false, error.localizedMessage ?: "فشل بدء خادم المشاركة")
         }
     }
 
+    @Synchronized
     fun stop(onStatusChange: (Boolean, String) -> Unit) {
         try {
-            server?.stop(0)
+            server?.stop()
             server = null
+            sessions.clear()
+            pairingAttempts.clear()
+            pairingCode = null
             isRunning = false
-            onStatusChange(false, "تم إيقاف الخادم")
-        } catch (e: Exception) {
-            onStatusChange(false, e.localizedMessage ?: "خطأ أثناء الإيقاف")
+            onStatusChange(false, "تم إيقاف الخادم وإبطال جلسات المشاركة")
+        } catch (error: Exception) {
+            onStatusChange(false, error.localizedMessage ?: "خطأ أثناء إيقاف الخادم")
         }
     }
 
-    fun getIpAddress(): String {
-        try {
-            val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
-            for (intf in interfaces) {
-                if (intf.isLoopback || !intf.isUp) continue
-                val addrs = Collections.list(intf.inetAddresses)
-                for (addr in addrs) {
-                    if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
-                        return addr.hostAddress ?: "127.0.0.1"
-                    }
-                }
-            }
-        } catch (ignored: Exception) {}
-        return "127.0.0.1"
+    fun getIpAddress(): String = findLocalIpv4Address() ?: "127.0.0.1"
+
+    private inner class LocalHttpServer(bindAddress: String) : NanoHTTPD(bindAddress, port) {
+        override fun serve(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response = handleRequest(session)
     }
 
-    private inner class HomeHandler : HttpHandler {
-        override fun handle(exchange: HttpExchange) {
-            scope.launch {
-                try {
-                    val mediaList = repository.allMedia.firstOrNull() ?: emptyList()
+    private fun handleRequest(request: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
+        return try {
+            when {
+                request.uri == "/pair" -> handlePair(request)
+                request.uri == "/" -> handleHome(request)
+                request.uri == "/media" -> handleMedia(request)
+                request.uri == "/upload" -> handleUpload(request)
+                else -> htmlResponse(NanoHTTPD.Response.Status.NOT_FOUND, page("غير موجود", "المسار المطلوب غير متاح."))
+            }
+        } catch (_: Exception) {
+            htmlResponse(
+                NanoHTTPD.Response.Status.INTERNAL_ERROR,
+                page("تعذر إكمال الطلب", "حدث خطأ أثناء معالجة الطلب. أوقف المشاركة ثم حاول مجدداً.")
+            )
+        }
+    }
 
-                    val itemsHtml = StringBuilder()
-                    if (mediaList.isEmpty()) {
-                        itemsHtml.append("""<p style="text-align:center; color:#888;">لا توجد ملفات وسائط حالياً في التطبيق.</p>""")
-                    } else {
-                        mediaList.forEach { item ->
-                            val isVid = item.mimeType?.startsWith("video") == true || item.path.endsWith(".mp4", true)
-                            val typeBadge = if (isVid) "🎬 فيديو" else "🎵 صوت"
-                            val sizeMb = String.format("%.1f", item.sizeBytes / (1024.0 * 1024.0))
+    private fun handleHome(request: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
+        if (request.method != NanoHTTPD.Method.GET) {
+            return htmlResponse(NanoHTTPD.Response.Status.METHOD_NOT_ALLOWED, page("طريقة غير مدعومة", "استخدم طلب GET."))
+        }
+        if (!isAuthorized(request)) return htmlResponse(NanoHTTPD.Response.Status.UNAUTHORIZED, pairingPage())
+        if (!canShare()) return htmlResponse(NanoHTTPD.Response.Status.FORBIDDEN, page("المشاركة موقوفة", "افتح التطبيق وأوقف القفل أو القيود التي تمنع المشاركة."))
 
-                            itemsHtml.append("""
-                                <div class="card">
-                                    <div class="card-info">
-                                        <span class="badge">$typeBadge</span>
-                                        <h3>${escapeHtml(item.name)}</h3>
-                                        <p>الحجم: ${sizeMb} MB</p>
-                                    </div>
-                                    <div class="card-actions">
-                                        <a href="/media?id=${item.id}&action=play" target="_blank" class="btn btn-play">▶ تشغيل</a>
-                                        <a href="/media?id=${item.id}&action=download" class="btn btn-download">⬇ تحميل</a>
-                                    </div>
-                                </div>
-                            """.trimIndent())
-                        }
-                    }
-
-                    val html = """
-                        <!DOCTYPE html>
-                        <html lang="ar" dir="rtl">
-                        <head>
-                            <meta charset="UTF-8">
-                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                            <title>SafePlayer - مشاركة وسائط Wi-Fi</title>
-                            <style>
-                                :root {
-                                    --bg: #121316;
-                                    --surface: #1e2025;
-                                    --primary: #4e8cff;
-                                    --text: #f0f2f5;
-                                    --text-secondary: #9aa0a6;
-                                    --border: #2e323b;
-                                }
-                                * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-                                body { background: var(--bg); color: var(--text); padding: 20px; line-height: 1.6; }
-                                .container { max-width: 800px; margin: 0 auto; }
-                                header { text-align: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
-                                header h1 { color: var(--primary); font-size: 26px; margin-bottom: 6px; }
-                                header p { color: var(--text-secondary); font-size: 14px; }
-                                
-                                .upload-box { background: var(--surface); border: 2px dashed var(--primary); border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 24px; }
-                                .upload-box input[type=file] { margin: 12px 0; color: var(--text); }
-                                .upload-box button { background: var(--primary); color: white; border: none; padding: 10px 24px; border-radius: 8px; font-weight: bold; cursor: pointer; }
-                                
-                                .section-title { font-size: 18px; margin-bottom: 14px; color: var(--text); }
-                                .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
-                                .card-info h3 { font-size: 15px; margin-bottom: 4px; word-break: break-all; }
-                                .card-info p { font-size: 12px; color: var(--text-secondary); }
-                                .badge { display: inline-block; background: rgba(78, 140, 255, 0.15); color: var(--primary); font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-bottom: 6px; }
-                                .card-actions { display: flex; gap: 8px; }
-                                .btn { text-decoration: none; padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: bold; }
-                                .btn-play { background: #2e7d32; color: white; }
-                                .btn-download { background: #37474f; color: white; }
-                            </style>
-                        </head>
-                        <body>
-                            <div class="container">
-                                <header>
-                                    <h1>SafePlayer Wi-Fi Hub 📡</h1>
-                                    <p>تصفح وشاهد ونزل ملفات هاتفك مباشرة عبر المتصفح بدون كابل</p>
-                                </header>
-                                
-                                <div class="upload-box">
-                                    <h3>📤 رفع ملف من الكمبيوتر إلى الهاتف</h3>
-                                    <form action="/upload" method="post" enctype="multipart/form-data">
-                                        <input type="file" name="file" required><br>
-                                        <button type="submit">بدء الرفع للهاتف</button>
-                                    </form>
-                                </div>
-                                
-                                <h2 class="section-title">📂 وسائط الهاتف (${mediaList.size} ملف)</h2>
-                                <div class="list">
-                                    $itemsHtml
-                                </div>
-                            </div>
-                        </body>
-                        </html>
+        val mediaList = runBlocking { repository.allMedia.firstOrNull() }.orEmpty()
+        val itemsHtml = if (mediaList.isEmpty()) {
+            "<p class=\"empty\">لا توجد ملفات وسائط حالياً.</p>"
+        } else {
+            mediaList.joinToString(separator = "") { item ->
+                val isVideo = item.mimeType?.startsWith("video/", ignoreCase = true) == true ||
+                    item.name.endsWith(".mp4", true) || item.name.endsWith(".mkv", true) || item.name.endsWith(".webm", true)
+                val badge = if (isVideo) "فيديو" else "صوت"
+                val sizeMb = "%.1f".format(item.sizeBytes.coerceAtLeast(0) / (1024.0 * 1024.0))
+                if (runBlocking { securityManager.isMediaProtected(item.id) }) {
+                    """<article class="card"><div><span class="badge">محتوى محمي</span><h2>عنصر في الخزنة</h2><p>لن تتم مشاركة هذا الملف عبر الشبكة.</p></div></article>"""
+                } else {
+                    """
+                    <article class="card">
+                        <div class="info"><span class="badge">$badge</span><h2>${escapeHtml(item.name)}</h2><p>الحجم: $sizeMb MB</p></div>
+                        <div class="actions">
+                            <a class="button play" href="/media?id=${item.id}&amp;action=play">تشغيل</a>
+                            <a class="button" href="/media?id=${item.id}&amp;action=download">تنزيل</a>
+                        </div>
+                    </article>
                     """.trimIndent()
-
-                    val bytes = html.toByteArray(Charsets.UTF_8)
-                    exchange.responseHeaders.set("Content-Type", "text/html; charset=UTF-8")
-                    exchange.sendResponseHeaders(200, bytes.size.toLong())
-                    exchange.responseBody.use { it.write(bytes) }
-                } catch (e: Exception) {
-                    val errMsg = "Error: ${e.message}".toByteArray()
-                    exchange.sendResponseHeaders(500, errMsg.size.toLong())
-                    exchange.responseBody.use { it.write(errMsg) }
                 }
             }
         }
+        return htmlResponse(NanoHTTPD.Response.Status.OK, homePage(itemsHtml, mediaList.size))
     }
 
-    private inner class MediaStreamHandler : HttpHandler {
-        override fun handle(exchange: HttpExchange) {
-            scope.launch {
-                try {
-                    val query = exchange.requestURI.query ?: ""
-                    val params = parseQueryParams(query)
-                    val id = params["id"]?.toIntOrNull()
-                    val action = params["action"] ?: "play"
+    private fun handlePair(request: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
+        if (request.method != NanoHTTPD.Method.POST) {
+            return htmlResponse(NanoHTTPD.Response.Status.METHOD_NOT_ALLOWED, page("طريقة غير مدعومة", "أرسل رمز الاقتران باستخدام POST."))
+        }
+        if (!isSameOriginIfProvided(request)) {
+            return htmlResponse(NanoHTTPD.Response.Status.FORBIDDEN, page("طلب مرفوض", "تعذر التحقق من مصدر الطلب."))
+        }
 
-                    if (id == null) {
-                        exchange.sendResponseHeaders(400, -1)
-                        return@launch
-                    }
+        val formContentType = request.headers.headerValue("content-type").orEmpty()
+        val formLength = request.headers.headerValue("content-length")?.toLongOrNull()
+        if (!formContentType.startsWith("application/x-www-form-urlencoded", ignoreCase = true) ||
+            formLength == null || formLength !in 1L..256L
+        ) {
+            return htmlResponse(NanoHTTPD.Response.Status.BAD_REQUEST, page("طلب غير صالح", "صيغة طلب الاقتران غير مدعومة."))
+        }
 
-                    val mediaItem = repository.getMediaById(id).firstOrNull()
-                    if (mediaItem == null) {
-                        exchange.sendResponseHeaders(404, -1)
-                        return@launch
-                    }
+        val clientIp = request.remoteIpAddress ?: "unknown"
+        val waitMs = pairingBlockedFor(clientIp)
+        if (waitMs > 0) {
+            return htmlResponse(
+                NanoHTTPD.Response.Status.FORBIDDEN,
+                page("محاولات كثيرة", "انتظر ${(waitMs + 999) / 1000} ثانية قبل إعادة المحاولة.")
+            )
+        }
 
-                    val file = File(mediaItem.path)
-                    if (!file.exists()) {
-                        exchange.sendResponseHeaders(404, -1)
-                        return@launch
-                    }
+        val formData = HashMap<String, String>()
+        request.parseBody(formData)
+        val submittedCode = request.parms["code"].orEmpty()
+        val expectedCode = pairingCode
+        if (!isRunning || expectedCode == null || !constantTimeEquals(submittedCode, expectedCode)) {
+            recordFailedPairing(clientIp)
+            return htmlResponse(NanoHTTPD.Response.Status.UNAUTHORIZED, pairingPage("رمز الاقتران غير صحيح."))
+        }
+        if (!canShare()) {
+            return htmlResponse(NanoHTTPD.Response.Status.FORBIDDEN, page("المشاركة موقوفة", "افتح التطبيق وتحقق من إعدادات الأمان."))
+        }
 
-                    if (action == "download") {
-                        val fileName = file.name
-                        exchange.responseHeaders.set("Content-Disposition", "attachment; filename=\"$fileName\"")
-                        exchange.responseHeaders.set("Content-Type", mediaItem.mimeType ?: "application/octet-stream")
-                        exchange.sendResponseHeaders(200, file.length())
-                        FileInputStream(file).use { input ->
-                            exchange.responseBody.use { output ->
-                                input.copyTo(output)
-                            }
-                        }
-                    } else {
-                        // Embedded HTML5 Player
-                        val isVideo = mediaItem.mimeType?.startsWith("video") == true || file.name.endsWith(".mp4", true)
-                        val playerTag = if (isVideo) {
-                            """<video controls autoplay width="100%" style="max-height:80vh; border-radius:10px;"><source src="/media?id=$id&action=download" type="video/mp4">متصفحك لا يدعم مشغل الفيديو.</video>"""
-                        } else {
-                            """<audio controls autoplay style="width:100%; margin-top:20px;"><source src="/media?id=$id&action=download" type="audio/mpeg">متصفحك لا يدعم مشغل الصوت.</audio>"""
-                        }
+        pruneExpiredSessions()
+        if (sessions.size >= MAX_ACTIVE_SESSIONS) {
+            return htmlResponse(NanoHTTPD.Response.Status.SERVICE_UNAVAILABLE, page("وصلت للحد", "أوقف جلسة مشاركة أخرى أو أعد تشغيل الخادم."))
+        }
 
-                        val html = """
-                            <!DOCTYPE html>
-                            <html lang="ar" dir="rtl">
-                            <head>
-                                <meta charset="UTF-8">
-                                <title>${escapeHtml(mediaItem.name)} - SafePlayer</title>
-                                <style>
-                                    body { background: #0f1013; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin:0; font-family: sans-serif; padding: 20px; box-sizing: border-box; }
-                                    .container { width: 100%; max-width: 900px; text-align: center; }
-                                    h2 { margin-bottom: 16px; font-size: 20px; color: #4e8cff; }
-                                    a.back { color: #888; text-decoration: none; margin-top: 20px; display: inline-block; font-size: 14px; }
-                                </style>
-                            </head>
-                            <body>
-                                <div class="container">
-                                    <h2>${escapeHtml(mediaItem.name)}</h2>
-                                    $playerTag
-                                    <br>
-                                    <a href="/" class="back">⬅ العودة إلى قائمة الوسائط</a>
-                                </div>
-                            </body>
-                            </html>
-                        """.trimIndent()
+        pairingAttempts.remove(clientIp)
+        val token = createSession(clientIp)
+        val response = htmlResponse(
+            NanoHTTPD.Response.Status.OK,
+            page("تم الاقتران", "تم توثيق هذا الجهاز مؤقتاً. <a href=\"/\">افتح مكتبة الوسائط</a>.")
+        )
+        response.addHeader(
+            "Set-Cookie",
+            "$SESSION_COOKIE=$token; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_IDLE_TIMEOUT_MS / 1000}"
+        )
+        return response
+    }
 
-                        val bytes = html.toByteArray(Charsets.UTF_8)
-                        exchange.responseHeaders.set("Content-Type", "text/html; charset=UTF-8")
-                        exchange.sendResponseHeaders(200, bytes.size.toLong())
-                        exchange.responseBody.use { it.write(bytes) }
-                    }
-                } catch (e: Exception) {
-                    exchange.sendResponseHeaders(500, -1)
+    private fun handleMedia(request: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
+        if (request.method != NanoHTTPD.Method.GET && request.method != NanoHTTPD.Method.HEAD) {
+            return htmlResponse(NanoHTTPD.Response.Status.METHOD_NOT_ALLOWED, page("طريقة غير مدعومة", "استخدم GET أو HEAD."))
+        }
+        if (!isAuthorized(request)) return htmlResponse(NanoHTTPD.Response.Status.UNAUTHORIZED, page("يلزم الاقتران", "ارجع إلى الصفحة الرئيسية وأدخل رمز الاقتران."))
+        if (!canShare()) return htmlResponse(NanoHTTPD.Response.Status.FORBIDDEN, page("المشاركة موقوفة", "تحقق من حالة القفل والرقابة الأبوية في التطبيق."))
+
+        val id = request.parms["id"]?.toIntOrNull()
+            ?: return htmlResponse(NanoHTTPD.Response.Status.BAD_REQUEST, page("طلب غير صالح", "معرّف الوسيط غير صالح."))
+        if (runBlocking { securityManager.isMediaProtected(id) }) {
+            return htmlResponse(NanoHTTPD.Response.Status.FORBIDDEN, page("محتوى محمي", "لا تتم مشاركة عناصر الخزنة عبر Wi-Fi."))
+        }
+        val item = runBlocking { repository.getMediaById(id).firstOrNull() }
+            ?: return htmlResponse(NanoHTTPD.Response.Status.NOT_FOUND, page("غير موجود", "لم يتم العثور على الوسيط."))
+
+        return when (request.parms["action"] ?: "play") {
+            "play" -> htmlResponse(NanoHTTPD.Response.Status.OK, playerPage(item))
+            "stream", "download" -> streamMedia(request, item)
+            else -> htmlResponse(NanoHTTPD.Response.Status.BAD_REQUEST, page("طلب غير صالح", "الإجراء المطلوب غير معروف."))
+        }
+    }
+
+    private fun streamMedia(request: NanoHTTPD.IHTTPSession, item: MediaItem): NanoHTTPD.Response {
+        val resource = openMedia(item)
+            ?: return htmlResponse(NanoHTTPD.Response.Status.NOT_FOUND, page("الملف غير متاح", "تعذر فتح مصدر الوسيط."))
+        val rangeHeader = request.headers.headerValue("range")
+        val range = if (resource.supportsRanges && rangeHeader != null) {
+            parseByteRange(rangeHeader, resource.length)
+                ?: run {
+                    resource.input.close()
+                    return htmlResponse(NanoHTTPD.Response.Status.BAD_REQUEST, page("نطاق غير صالح", "صيغة طلب نطاق الوسائط غير مدعومة."))
+                }
+        } else null
+
+        val input: InputStream
+        val responseLength: Long
+        val status: NanoHTTPD.Response.IStatus
+        if (range != null) {
+            try {
+                skipFully(resource.input, range.start)
+            } catch (_: IOException) {
+                resource.input.close()
+                return htmlResponse(NanoHTTPD.Response.Status.BAD_REQUEST, page("نطاق غير صالح", "تعذر قراءة موضع الوسيط المطلوب."))
+            }
+            input = LimitedInputStream(resource.input, range.end - range.start + 1)
+            responseLength = range.end - range.start + 1
+            status = NanoHTTPD.Response.Status.PARTIAL_CONTENT
+        } else {
+            input = resource.input
+            responseLength = resource.length
+            status = NanoHTTPD.Response.Status.OK
+        }
+
+        val response = if (responseLength > 0L) {
+            NanoHTTPD.newFixedLengthResponse(status, resource.mimeType, input, responseLength)
+        } else {
+            NanoHTTPD.newChunkedResponse(status, resource.mimeType, input)
+        }
+        response.addHeader("Cache-Control", "private, no-store")
+        if (resource.supportsRanges) response.addHeader("Accept-Ranges", "bytes")
+        if (range != null) response.addHeader("Content-Range", "bytes ${range.start}-${range.end}/${resource.length}")
+        val disposition = if (request.parms["action"] == "download") "attachment" else "inline"
+        val safeName = safeFileName(item.name)
+        val encodedName = URLEncoder.encode(safeName, StandardCharsets.UTF_8.name()).replace("+", "%20")
+        response.addHeader("Content-Disposition", "$disposition; filename=\"$safeName\"; filename*=UTF-8''$encodedName")
+        addSecurityHeaders(response)
+        return response
+    }
+
+    private fun handleUpload(request: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
+        if (request.method != NanoHTTPD.Method.POST) {
+            return htmlResponse(NanoHTTPD.Response.Status.METHOD_NOT_ALLOWED, page("طريقة غير مدعومة", "استخدم POST لرفع ملف."))
+        }
+        if (!isAuthorized(request)) return htmlResponse(NanoHTTPD.Response.Status.UNAUTHORIZED, page("يلزم الاقتران", "ارجع إلى الصفحة الرئيسية وأدخل رمز الاقتران."))
+        if (!isSameOriginRequired(request)) return htmlResponse(NanoHTTPD.Response.Status.FORBIDDEN, page("طلب مرفوض", "تعذر التحقق من مصدر الطلب."))
+        if (!canShare() || !canAddSource()) {
+            return htmlResponse(NanoHTTPD.Response.Status.FORBIDDEN, page("الرفع موقوف", "الرقابة الأبوية أو قفل التطبيق يمنعان هذا الإجراء."))
+        }
+
+        val contentType = request.headers.headerValue("content-type").orEmpty()
+        if (!contentType.equals("application/octet-stream", ignoreCase = true)) {
+            return htmlResponse(NanoHTTPD.Response.Status.BAD_REQUEST, page("صيغة غير مدعومة", "أرسل الملف بصيغة application/octet-stream."))
+        }
+        if (request.headers.headerValue("transfer-encoding")?.contains("chunked", ignoreCase = true) == true) {
+            return htmlResponse(NanoHTTPD.Response.Status.BAD_REQUEST, page("طلب غير مدعوم", "يجب إرسال طول الملف صراحةً."))
+        }
+        val contentLength = request.headers.headerValue("content-length")?.toLongOrNull()
+            ?: return htmlResponse(NanoHTTPD.Response.Status.BAD_REQUEST, page("حجم غير معروف", "تعذر قراءة حجم الملف."))
+        if (contentLength <= 0L || contentLength > MAX_UPLOAD_BYTES) {
+            return htmlResponse(NanoHTTPD.Response.Status.BAD_REQUEST, page("حجم غير مقبول", "الحد الأقصى للرفع هو ${MAX_UPLOAD_LABEL}."))
+        }
+        if (!uploadSemaphore.tryAcquire()) {
+            return htmlResponse(NanoHTTPD.Response.Status.SERVICE_UNAVAILABLE, page("الرفع مشغول", "انتظر حتى ينتهي الرفع الجاري."))
+        }
+
+        var targetFile: File? = null
+        var uploadComplete = false
+        try {
+            val uploadDir = File(
+                context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: File(context.filesDir, "Downloads"),
+                "SafePlayer_Received"
+            )
+            if (!uploadDir.exists() && !uploadDir.mkdirs()) throw IOException("Could not create upload directory")
+            val name = safeFileName(request.parms["name"].orEmpty())
+            val target = File(uploadDir, "${System.currentTimeMillis()}_$name")
+            targetFile = target
+            if (target.canonicalFile.parentFile != uploadDir.canonicalFile) throw IOException("Invalid upload path")
+
+            var received = 0L
+            val input = request.inputStream
+            target.outputStream().use { output ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (received < contentLength) {
+                    val count = input.read(buffer, 0, minOf(buffer.size.toLong(), contentLength - received).toInt())
+                    if (count < 0) throw IOException("Upload ended before Content-Length")
+                    if (count == 0) continue
+                    output.write(buffer, 0, count)
+                    received += count
                 }
             }
+            if (received != contentLength) throw IOException("Upload length mismatch")
+            uploadComplete = true
+            return htmlResponse(
+                NanoHTTPD.Response.Status.OK,
+                page("اكتمل الرفع", "تم حفظ الملف في مجلد SafePlayer_Received داخل مساحة التطبيق. يمكنك إيقاف الخادم الآن.")
+            )
+        } catch (_: Exception) {
+            return htmlResponse(NanoHTTPD.Response.Status.BAD_REQUEST, page("فشل الرفع", "تعذر حفظ الملف أو تجاوز الحد المسموح."))
+        } finally {
+            if (!uploadComplete) targetFile?.delete()
+            uploadSemaphore.release()
         }
     }
 
-    private inner class UploadHandler : HttpHandler {
-        override fun handle(exchange: HttpExchange) {
-            scope.launch {
-                try {
-                    if (exchange.requestMethod.equals("POST", ignoreCase = true)) {
-                        val contentType = exchange.requestHeaders.getFirst("Content-Type") ?: ""
-                        if (contentType.contains("multipart/form-data")) {
-                            val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                                ?: context.filesDir
-                            val targetFile = File(downloadDir, "SafePlayer_Uploaded_${System.currentTimeMillis()}.bin")
+    private fun openMedia(item: MediaItem): MediaResource? {
+        val uri = runCatching { Uri.parse(item.path) }.getOrNull()
+        val mimeType = item.mimeType?.takeIf { it.contains('/') && !it.contains('\r') && !it.contains('\n') }
+            ?: uri?.let { runCatching { context.contentResolver.getType(it) }.getOrNull() }
+            ?: "application/octet-stream"
+        if (uri?.scheme.equals("content", ignoreCase = true)) {
+            val stream = context.contentResolver.openInputStream(uri) ?: return null
+            return MediaResource(stream, item.sizeBytes.coerceAtLeast(0L), mimeType, supportsRanges = false)
+        }
 
-                            // Read uploaded payload and save
-                            exchange.requestBody.use { input ->
-                                FileOutputStream(targetFile).use { output ->
-                                    input.copyTo(output)
-                                }
-                            }
+        val file = if (uri?.scheme.equals("file", ignoreCase = true)) {
+            uri?.path?.let(::File) ?: return null
+        } else {
+            File(item.path)
+        }
+        if (!file.isFile || !file.canRead()) return null
+        val length = file.length()
+        val stream = FileInputStream(file)
+        return MediaResource(stream, length, mimeType, supportsRanges = true)
+    }
 
-                            val successHtml = """
-                                <!DOCTYPE html>
-                                <html lang="ar" dir="rtl">
-                                <head><meta charset="UTF-8"><title>نجاح الرفع</title></head>
-                                <body style="background:#121316;color:#fff;text-align:center;padding:50px;font-family:sans-serif;">
-                                    <h2 style="color:#4caf50;">✅ تم استلام الملف بنجاح على هاتفك!</h2>
-                                    <p>تم حفظ الملف في مجلد التنزيلات (Downloads).</p>
-                                    <br><a href="/" style="color:#4e8cff;text-decoration:none;">⬅ العودة للقائمة</a>
-                                </body>
-                                </html>
-                            """.trimIndent()
-                            val bytes = successHtml.toByteArray(Charsets.UTF_8)
-                            exchange.responseHeaders.set("Content-Type", "text/html; charset=UTF-8")
-                            exchange.sendResponseHeaders(200, bytes.size.toLong())
-                            exchange.responseBody.use { it.write(bytes) }
-                            return@launch
+    private fun handlePairingPage(message: String? = null): String {
+        val error = message?.let { "<p class=\"error\">${escapeHtml(it)}</p>" }.orEmpty()
+        return page(
+            "اقتران جهاز",
+            """
+            <p>أدخل رمز الاقتران الظاهر داخل SafePlayer. الرمز مطلوب لكل جهاز جديد، والجلسة تنتهي تلقائياً بعد 15 دقيقة من عدم النشاط.</p>
+            $error
+            <form method="post" action="/pair" autocomplete="off">
+              <label for="code">رمز الاقتران</label>
+              <input id="code" name="code" type="password" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" required autofocus>
+              <button type="submit">اقتران مؤقت</button>
+            </form>
+            """.trimIndent()
+        )
+    }
+
+    private fun pairingPage(message: String? = null): String = handlePairingPage(message)
+
+    private fun homePage(itemsHtml: String, itemCount: Int): String = page(
+        "SafePlayer Wi-Fi",
+        """
+        <header><h1>SafePlayer Wi-Fi</h1><p>جلسة محلية مؤقتة · $itemCount عنصر</p></header>
+        <section class="upload">
+          <h2>رفع ملف إلى الهاتف</h2>
+          <p>يُحفظ الملف في مساحة SafePlayer الخاصة. الحد الأقصى: $MAX_UPLOAD_LABEL.</p>
+          <form id="upload-form">
+            <input id="upload-file" type="file" required>
+            <button type="submit">رفع الملف</button>
+          </form>
+          <p id="upload-status" role="status"></p>
+        </section>
+        <section><h2>الوسائط المتاحة للمشاركة</h2><div class="list">$itemsHtml</div></section>
+        <script>
+          document.getElementById('upload-form').addEventListener('submit', async function (event) {
+            event.preventDefault();
+            const file = document.getElementById('upload-file').files[0];
+            const status = document.getElementById('upload-status');
+            if (!file) return;
+            status.textContent = 'جارٍ الرفع…';
+            try {
+              const response = await fetch('/upload?name=' + encodeURIComponent(file.name), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/octet-stream' },
+                body: file,
+                credentials: 'same-origin'
+              });
+              const result = await response.text();
+              status.textContent = response.ok ? 'اكتمل الرفع إلى مجلد SafePlayer_Received.' : 'فشل الرفع (' + response.status + ').';
+            } catch (_) { status.textContent = 'تعذر الاتصال بالخادم.'; }
+          });
+        </script>
+        """.trimIndent()
+    )
+
+    private fun playerPage(item: MediaItem): String {
+        val isVideo = item.mimeType?.startsWith("video/", ignoreCase = true) == true ||
+            item.name.endsWith(".mp4", true) || item.name.endsWith(".mkv", true) || item.name.endsWith(".webm", true)
+        val mediaTag = if (isVideo) {
+            "<video controls autoplay playsinline preload=\"metadata\" src=\"/media?id=${item.id}&amp;action=stream\"></video>"
+        } else {
+            "<audio controls autoplay preload=\"metadata\" src=\"/media?id=${item.id}&amp;action=stream\"></audio>"
+        }
+        return page(escapeHtml(item.name), "<a href=\"/\">العودة إلى القائمة</a><h1>${escapeHtml(item.name)}</h1>$mediaTag")
+    }
+
+    private fun page(title: String, body: String): String = """
+        <!doctype html><html lang="ar" dir="rtl"><head>
+        <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <meta name="referrer" content="no-referrer"><title>${escapeHtml(title)}</title>
+        <style>
+          :root{color-scheme:dark;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#121316;color:#f0f2f5}
+          *{box-sizing:border-box}body{margin:0;padding:24px;line-height:1.6}.wrap{max-width:850px;margin:0 auto}
+          h1{color:#7ba9ff;margin:.2em 0}h2{font-size:1.1rem}.card,.upload,form{background:#1e2025;border:1px solid #30343e;border-radius:12px;padding:16px;margin:14px 0}
+          .card{display:flex;justify-content:space-between;align-items:center;gap:16px}.info{min-width:0}.card h2{overflow-wrap:anywhere}.badge{color:#9dc0ff;font-size:.8rem}
+          .actions{display:flex;gap:8px;flex-shrink:0}.button,button{border:0;border-radius:8px;background:#37474f;color:#fff;padding:10px 14px;text-decoration:none;font:inherit;cursor:pointer}
+          .button.play{background:#246b39}input{display:block;width:100%;margin:10px 0;padding:12px;border-radius:8px;border:1px solid #687080;background:#111318;color:#fff}
+          .error{color:#ff8d8d}.empty{color:#aaa;text-align:center}video,audio{display:block;width:100%;max-height:80vh;margin:20px auto 0}
+          @media(max-width:560px){body{padding:14px}.card{align-items:flex-start;flex-direction:column}.actions{width:100%}.actions .button{flex:1;text-align:center}}
+        </style></head><body><main class="wrap">$body</main></body></html>
+    """.trimIndent()
+
+    private fun isAuthorized(request: NanoHTTPD.IHTTPSession): Boolean {
+        val cookieHeader = request.headers.headerValue("cookie") ?: return false
+        val token = cookieHeader.split(';')
+            .map { it.trim() }
+            .firstOrNull { it.startsWith("$SESSION_COOKIE=") }
+            ?.substringAfter('=')
+            ?: return false
+        val session = sessions[token] ?: return false
+        val ip = request.remoteIpAddress ?: return false
+        val now = System.currentTimeMillis()
+        if (session.ipAddress != ip || now - session.lastActivity.get() > SESSION_IDLE_TIMEOUT_MS) {
+            sessions.remove(token, session)
+            return false
+        }
+        session.lastActivity.set(now)
+        return true
+    }
+
+    private fun createSession(ipAddress: String): String {
+        val bytes = ByteArray(32).also(random::nextBytes)
+        val token = android.util.Base64.encodeToString(
+            bytes,
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+        )
+        sessions[token] = ClientSession(ipAddress, AtomicLong(System.currentTimeMillis()))
+        return token
+    }
+
+    private fun pruneExpiredSessions() {
+        val now = System.currentTimeMillis()
+        sessions.entries.removeIf { now - it.value.lastActivity.get() > SESSION_IDLE_TIMEOUT_MS }
+    }
+
+    private fun pairingBlockedFor(ipAddress: String): Long {
+        val attempt = pairingAttempts[ipAddress] ?: return 0L
+        synchronized(attempt) {
+            val remaining = attempt.blockedUntil - System.currentTimeMillis()
+            if (remaining > 0) return remaining
+            if (attempt.blockedUntil != 0L) {
+                attempt.failures = 0
+                attempt.blockedUntil = 0L
+            }
+            return 0L
+        }
+    }
+
+    private fun recordFailedPairing(ipAddress: String) {
+        val attempt = pairingAttempts.getOrPut(ipAddress) { PairingAttempt() }
+        synchronized(attempt) {
+            attempt.failures++
+            if (attempt.failures >= MAX_PAIRING_FAILURES) {
+                attempt.failures = 0
+                attempt.blockedUntil = System.currentTimeMillis() + PAIRING_LOCKOUT_MS
+            }
+        }
+        if (pairingAttempts.size > 128) {
+            pairingAttempts.entries.removeIf { it.value.blockedUntil < System.currentTimeMillis() && it.value.failures == 0 }
+        }
+    }
+
+    private fun generatePairingCode(): String = (10_000_000 + random.nextInt(90_000_000)).toString()
+
+    private fun constantTimeEquals(candidate: String, expected: String): Boolean {
+        if (candidate.length != expected.length) return false
+        return MessageDigest.isEqual(
+            candidate.toByteArray(StandardCharsets.US_ASCII),
+            expected.toByteArray(StandardCharsets.US_ASCII)
+        )
+    }
+
+    private fun canShare(): Boolean = runBlocking { securityManager.canPerformAction(SecurityAction.SHARE) }
+
+    private fun canAddSource(): Boolean = runBlocking { securityManager.canPerformAction(SecurityAction.ADD_SOURCE) }
+
+    private fun isSameOriginIfProvided(request: NanoHTTPD.IHTTPSession): Boolean {
+        val origin = request.headers.headerValue("origin") ?: return true
+        val host = request.headers.headerValue("host") ?: return false
+        return origin.equals("http://$host", ignoreCase = true)
+    }
+
+    private fun isSameOriginRequired(request: NanoHTTPD.IHTTPSession): Boolean =
+        request.headers.headerValue("origin") != null && isSameOriginIfProvided(request)
+
+    private fun htmlResponse(status: NanoHTTPD.Response.IStatus, html: String): NanoHTTPD.Response {
+        val response = NanoHTTPD.newFixedLengthResponse(status, "text/html; charset=utf-8", html)
+        addSecurityHeaders(response)
+        return response
+    }
+
+    private fun addSecurityHeaders(response: NanoHTTPD.Response) {
+        response.addHeader("X-Content-Type-Options", "nosniff")
+        response.addHeader("X-Frame-Options", "DENY")
+        response.addHeader("Referrer-Policy", "no-referrer")
+        response.addHeader("Cache-Control", "no-store")
+        response.addHeader(
+            "Content-Security-Policy",
+            "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; media-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+        )
+    }
+
+    private fun parseByteRange(header: String, totalLength: Long): ByteRange? {
+        if (totalLength <= 0L || !header.startsWith("bytes=", ignoreCase = true)) return null
+        val parts = header.substringAfter('=').split('-')
+        if (parts.size != 2 || header.contains(',')) return null
+        val start: Long
+        val end: Long
+        if (parts[0].isBlank()) {
+            val suffixLength = parts[1].toLongOrNull()?.takeIf { it > 0L } ?: return null
+            start = (totalLength - suffixLength).coerceAtLeast(0L)
+            end = totalLength - 1
+        } else {
+            start = parts[0].toLongOrNull() ?: return null
+            end = if (parts[1].isBlank()) totalLength - 1 else parts[1].toLongOrNull() ?: return null
+        }
+        if (start < 0L || start >= totalLength || end < start) return null
+        return ByteRange(start, end.coerceAtMost(totalLength - 1))
+    }
+
+    private fun skipFully(input: InputStream, count: Long) {
+        var remaining = count
+        while (remaining > 0L) {
+            val skipped = input.skip(remaining)
+            if (skipped > 0L) {
+                remaining -= skipped
+            } else if (input.read() == -1) {
+                throw IOException("Could not seek to requested byte range")
+            } else {
+                remaining--
+            }
+        }
+    }
+
+    private fun safeFileName(input: String): String {
+        val leaf = input.substringAfterLast('/').substringAfterLast('\\')
+        val cleaned = leaf.replace(Regex("[\\p{Cntrl}\\\\/:*?\"<>|]"), "_")
+            .trim()
+            .trim('.')
+            .take(120)
+        return cleaned.takeUnless { it.isBlank() || it == "." || it == ".." } ?: "uploaded_media.bin"
+    }
+
+    private fun escapeHtml(text: String): String = text
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#39;")
+
+    private fun Map<String, String>.headerValue(name: String): String? =
+        entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
+
+    private data class ClientSession(val ipAddress: String, val lastActivity: AtomicLong)
+    private data class PairingAttempt(var failures: Int = 0, var blockedUntil: Long = 0L)
+    private data class ByteRange(val start: Long, val end: Long)
+    private data class MediaResource(
+        val input: InputStream,
+        val length: Long,
+        val mimeType: String,
+        val supportsRanges: Boolean
+    )
+
+    private class LimitedInputStream(input: InputStream, private var remaining: Long) : FilterInputStream(input) {
+        override fun read(): Int {
+            if (remaining <= 0L) return -1
+            val value = super.read()
+            if (value >= 0) remaining--
+            return value
+        }
+
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            if (remaining <= 0L) return -1
+            val count = super.read(buffer, offset, minOf(length.toLong(), remaining).toInt())
+            if (count > 0) remaining -= count
+            return count
+        }
+    }
+
+    companion object {
+        private const val DEFAULT_PORT = 8080
+        private const val SOCKET_READ_TIMEOUT_MS = 10_000
+        private const val SESSION_COOKIE = "SAFEPLAYER_SESSION"
+        private const val SESSION_IDLE_TIMEOUT_MS = 15 * 60 * 1000L
+        private const val MAX_ACTIVE_SESSIONS = 3
+        private const val MAX_PAIRING_FAILURES = 5
+        private const val PAIRING_LOCKOUT_MS = 60_000L
+        private const val MAX_UPLOAD_BYTES = 1024L * 1024L * 1024L
+        private const val MAX_UPLOAD_LABEL = "1 GiB"
+
+        private fun findLocalIpv4Address(): String? {
+            return try {
+                val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
+                    .filter { networkInterface -> networkInterface.isUp && !networkInterface.isLoopback }
+                    .sortedBy { networkInterface -> if (networkInterface.name.startsWith("wlan", true)) 0 else 1 }
+                for (networkInterface in interfaces) {
+                    for (address in Collections.list(networkInterface.inetAddresses)) {
+                        if (address is Inet4Address && !address.isLoopbackAddress && !address.isLinkLocalAddress) {
+                            return address.hostAddress
                         }
                     }
-                    exchange.sendResponseHeaders(405, -1)
-                } catch (e: Exception) {
-                    exchange.sendResponseHeaders(500, -1)
                 }
+                null
+            } catch (_: Exception) {
+                null
             }
         }
-    }
-
-    private fun parseQueryParams(query: String): Map<String, String> {
-        val result = mutableMapOf<String, String>()
-        for (param in query.split("&")) {
-            val pair = param.split("=")
-            if (pair.size == 2) {
-                result[URLDecoder.decode(pair[0], "UTF-8")] = URLDecoder.decode(pair[1], "UTF-8")
-            }
-        }
-        return result
-    }
-
-    private fun escapeHtml(text: String): String {
-        return text.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\"", "&quot;")
     }
 }

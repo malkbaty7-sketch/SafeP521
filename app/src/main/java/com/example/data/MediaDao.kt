@@ -128,22 +128,6 @@ interface MediaDao {
     @Query("UPDATE detection_results SET status = :status WHERE id = :resultId")
     suspend fun updateDetectionResultStatus(resultId: Int, status: String)
     
-    // --- Processing Jobs ---
-    @Query("SELECT * FROM processing_jobs ORDER BY startTime DESC")
-    fun getAllProcessingJobs(): kotlinx.coroutines.flow.Flow<List<com.example.processing.ProcessingJob>>
-    
-    @Query("SELECT * FROM processing_jobs WHERE status IN ('QUEUED', 'PROCESSING')")
-    suspend fun getActiveProcessingJobs(): List<com.example.processing.ProcessingJob>
-    
-    @Insert
-    suspend fun insertProcessingJob(job: com.example.processing.ProcessingJob): Long
-    
-    @Update
-    suspend fun updateProcessingJob(job: com.example.processing.ProcessingJob)
-    
-    @Query("SELECT * FROM processing_jobs WHERE id = :id")
-    suspend fun getProcessingJobById(id: Int): com.example.processing.ProcessingJob?
-    
     // --- Timeline Markers ---
     @Query("SELECT * FROM timeline_markers WHERE mediaId = :mediaId ORDER BY timeMs ASC")
     fun getMarkersForMedia(mediaId: Int): kotlinx.coroutines.flow.Flow<List<TimelineMarker>>

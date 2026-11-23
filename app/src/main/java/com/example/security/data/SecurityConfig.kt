@@ -1,5 +1,6 @@
 package com.example.security.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -22,5 +23,7 @@ data class SecurityConfig(
     val blockEdit: Boolean = false,
     val blockAddSource: Boolean = false,
     val blockSettings: Boolean = false,
-    val isScreenshotProtectionEnabled: Boolean = false
+    val isScreenshotProtectionEnabled: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val failedAttempts: Int = 0,
+    @ColumnInfo(defaultValue = "0") val lockoutUntilTimestamp: Long = 0L
 )

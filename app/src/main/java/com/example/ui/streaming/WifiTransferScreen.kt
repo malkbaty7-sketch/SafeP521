@@ -1,6 +1,7 @@
 package com.example.ui.streaming
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -20,7 +21,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.SafePlayerApp
+import com.example.security.SecurityAction
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,10 +36,33 @@ fun WifiTransferScreen(
 ) {
     val context = LocalContext.current
     val server = app.wifiShareServer
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
 
     var isRunning by remember { mutableStateOf(server.isRunning) }
     var serverUrl by remember { mutableStateOf(if (server.isRunning) "http://${server.getIpAddress()}:8080" else "") }
-    var statusText by remember { mutableStateOf(if (server.isRunning) "الخادم قيد التشغيل وجاهز للاتصال" else "الخادم متوقف") }
+    var pairingCode by remember { mutableStateOf(server.pairingCode.orEmpty()) }
+    var statusText by remember { mutableStateOf(if (server.isRunning) "الخادم جاهز؛ أدخل رمز الاقتران على الجهاز الآخر" else "الخادم متوقف") }
+
+    DisposableEffect(server, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && server.isRunning) {
+                server.stop { running, message ->
+                    isRunning = running
+                    serverUrl = ""
+                    pairingCode = ""
+                    statusText = message
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            if (server.isRunning) {
+                server.stop { _, _ -> }
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -113,15 +142,25 @@ fun WifiTransferScreen(
                                     isRunning = running
                                     statusText = msg
                                     serverUrl = ""
+                                    pairingCode = ""
                                 }
                             } else {
-                                server.start { running, urlOrMsg ->
-                                    isRunning = running
-                                    if (running) {
-                                        serverUrl = urlOrMsg
-                                        statusText = "الخادم قيد التشغيل وجاهز للاتصال"
-                                    } else {
-                                        statusText = urlOrMsg
+                                scope.launch {
+                                    if (!app.securityManager.canPerformAction(SecurityAction.SHARE)) {
+                                        Toast.makeText(context, "المشاركة محظورة بسبب القفل أو الرقابة الأبوية", Toast.LENGTH_LONG).show()
+                                        return@launch
+                                    }
+                                    server.start { running, urlOrMsg ->
+                                        isRunning = running
+                                        if (running) {
+                                            serverUrl = urlOrMsg
+                                            pairingCode = server.pairingCode.orEmpty()
+                                            statusText = "أدخل رمز الاقتران الظاهر أدناه على الجهاز الآخر"
+                                        } else {
+                                            serverUrl = ""
+                                            pairingCode = ""
+                                            statusText = urlOrMsg
+                                        }
                                     }
                                 }
                             }
@@ -172,6 +211,31 @@ fun WifiTransferScreen(
                             )
                         }
 
+                        Spacer(Modifier.height(16.dp))
+                        Text("رمز الاقتران المؤقت:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = pairingCode.ifBlank { "--------" },
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                                textAlign = TextAlign.Center,
+                                letterSpacing = 8.sp
+                            )
+                        }
+                        Text(
+                            "أدخل الرمز على الجهاز الآخر. استخدم شبكة موثوقة فقط، وأوقف الخادم عند الانتهاء؛ اتصال HTTP المحلي غير مشفّر.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            textAlign = TextAlign.Center
+                        )
+
                         Spacer(Modifier.height(12.dp))
 
                         Row(
@@ -209,8 +273,9 @@ fun WifiTransferScreen(
                     Spacer(Modifier.height(10.dp))
                     InstructionStep(number = "1", text = "تأكد من اتصال هاتفك وجهاز الكمبيوتر أو التلفاز بنفس شبكة الـ Wi-Fi.")
                     InstructionStep(number = "2", text = "اضغط على زر (تشغيل خادم المشاركة الآن) أعلاه.")
-                    InstructionStep(number = "3", text = "افتح أي متصفح ويب على جهاز الكمبيوتر (Chrome, Edge, Safari) واكتب العنوان الظاهر.")
-                    InstructionStep(number = "4", text = "يمكنك الآن مشاهدة أي فيديو، تحميله إلى الكمبيوتر، أو رفع فيديوهات جديدة لهاتفك بدون أسلاك وبأعلى سرعة ممكنة!")
+                    InstructionStep(number = "3", text = "افتح الرابط على جهاز موثوق وأدخل رمز الاقتران المؤقت الظاهر أعلاه.")
+                    InstructionStep(number = "4", text = "يمكنك تشغيل أو تنزيل الوسائط غير المحمية ورفع ملف حتى 1 GiB إلى مساحة SafePlayer الخاصة. عناصر الخزنة لا تُشارك.")
+                    InstructionStep(number = "5", text = "الخادم يتوقف عند مغادرة الشاشة؛ أوقفه يدوياً فور الانتهاء. الشبكة المحلية تستخدم HTTP غير مشفّر.")
                 }
             }
         }

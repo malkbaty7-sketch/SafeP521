@@ -5,17 +5,22 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.net.Uri
 import android.os.Environment
 import com.example.data.MediaItem
 import com.example.data.MediaRepository
 import com.example.data.MediaType
+import com.example.security.SecurityAction
+import com.example.security.SecurityManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileNotFoundException
 import java.nio.ByteBuffer
+import java.util.UUID
 
 object AudioExtractor {
-
     data class ExtractionResult(
         val isSuccess: Boolean,
         val outputPath: String? = null,
@@ -23,109 +28,120 @@ object AudioExtractor {
         val errorMessage: String? = null
     )
 
-    /**
-     * Lossless audio extraction from video using native MediaExtractor and MediaMuxer.
-     * Copies compressed audio samples directly to an M4A/AAC container in milliseconds.
-     */
+    /** Copies the compressed audio track into a private M4A file without decoding/re-encoding it. */
     suspend fun extractAudio(
         context: Context,
         repository: MediaRepository,
+        securityManager: SecurityManager,
         videoItem: MediaItem,
         onProgress: (Float) -> Unit = {}
     ): ExtractionResult = withContext(Dispatchers.IO) {
         var extractor: MediaExtractor? = null
         var muxer: MediaMuxer? = null
+        var outputFile: File? = null
+        var savedToLibrary = false
 
         try {
-            val inputFile = File(videoItem.path)
-            if (!inputFile.exists()) {
-                return@withContext ExtractionResult(false, errorMessage = "الملف غير موجود")
+            if (!securityManager.canPerformAction(SecurityAction.EXPORT) ||
+                !securityManager.canAccessMedia(videoItem.id)
+            ) {
+                return@withContext ExtractionResult(false, errorMessage = "استخراج الصوت محظور بسبب إعدادات الأمان")
             }
 
-            extractor = MediaExtractor().apply {
-                setDataSource(inputFile.absolutePath)
-            }
+            val activeExtractor = MediaExtractor()
+            extractor = activeExtractor
+            setExtractorDataSource(activeExtractor, context, videoItem.path)
 
-            // Find audio track
             var audioTrackIndex = -1
             var audioFormat: MediaFormat? = null
-
-            for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                if (mime.startsWith("audio/")) {
-                    audioTrackIndex = i
+            for (index in 0 until activeExtractor.trackCount) {
+                val format = activeExtractor.getTrackFormat(index)
+                if (format.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
+                    audioTrackIndex = index
                     audioFormat = format
                     break
                 }
             }
-
-            if (audioTrackIndex == -1 || audioFormat == null) {
+            val trackFormat = audioFormat
+                ?: return@withContext ExtractionResult(false, errorMessage = "لم يتم العثور على مسار صوتي داخل هذا الفيديو")
+            if (audioTrackIndex < 0) {
                 return@withContext ExtractionResult(false, errorMessage = "لم يتم العثور على مسار صوتي داخل هذا الفيديو")
             }
 
-            extractor.selectTrack(audioTrackIndex)
+            activeExtractor.selectTrack(audioTrackIndex)
+            val musicDir = (context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
+                ?: File(context.filesDir, "Music")).apply {
+                if (!exists() && !mkdirs()) throw IllegalStateException("تعذر إنشاء مجلد الصوتيات")
+            }
+            val cleanName = safeFileName(videoItem.name.substringBeforeLast('.', videoItem.name))
+            val output = File(musicDir, "${cleanName}_Audio_${UUID.randomUUID()}.m4a")
+            outputFile = output
 
-            // Setup output file
-            val musicDir = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: context.filesDir
-            val cleanName = videoItem.name.substringBeforeLast('.')
-            val outputFile = File(musicDir, "${cleanName}_Audio_${System.currentTimeMillis()}.m4a")
+            val activeMuxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            muxer = activeMuxer
+            val muxerTrackIndex = activeMuxer.addTrack(trackFormat)
+            activeMuxer.start()
 
-            muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-            val muxerTrackIndex = muxer.addTrack(audioFormat)
-            muxer.start()
-
-            // Buffer copy
-            val maxBufferSize = audioFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 1024 * 512)
-            val buffer = ByteBuffer.allocate(maxBufferSize)
+            val requestedBufferSize = if (trackFormat.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+                trackFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+            } else {
+                DEFAULT_BUFFER_SIZE_BYTES
+            }
+            val buffer = ByteBuffer.allocate(requestedBufferSize.coerceIn(1024, MAX_BUFFER_SIZE_BYTES))
             val bufferInfo = MediaCodec.BufferInfo()
-
-            val durationUs = if (audioFormat.containsKey(MediaFormat.KEY_DURATION)) {
-                audioFormat.getLong(MediaFormat.KEY_DURATION)
+            val durationUs = if (trackFormat.containsKey(MediaFormat.KEY_DURATION)) {
+                trackFormat.getLong(MediaFormat.KEY_DURATION)
             } else {
                 videoItem.durationMs * 1000
             }
 
-            var sawEOS = false
+            var sawEndOfStream = false
             var sampleCount = 0
+            while (!sawEndOfStream) {
+                if (sampleCount % SECURITY_RECHECK_INTERVAL_SAMPLES == 0 &&
+                    (!securityManager.canPerformAction(SecurityAction.EXPORT) ||
+                        !securityManager.canAccessMedia(videoItem.id))
+                ) {
+                    throw SecurityException("تم إيقاف استخراج الصوت بسبب تغيير صلاحيات الوصول")
+                }
 
-            while (!sawEOS) {
+                buffer.clear()
                 bufferInfo.offset = 0
-                bufferInfo.size = extractor.readSampleData(buffer, 0)
-
+                bufferInfo.size = activeExtractor.readSampleData(buffer, 0)
                 if (bufferInfo.size < 0) {
-                    sawEOS = true
+                    sawEndOfStream = true
                     bufferInfo.size = 0
                 } else {
-                    bufferInfo.presentationTimeUs = extractor.sampleTime
-                    bufferInfo.flags = extractor.sampleFlags
-                    muxer.writeSampleData(muxerTrackIndex, buffer, bufferInfo)
-                    extractor.advance()
+                    bufferInfo.presentationTimeUs = activeExtractor.sampleTime
+                    bufferInfo.flags = activeExtractor.sampleFlags
+                    activeMuxer.writeSampleData(muxerTrackIndex, buffer, bufferInfo)
+                    activeExtractor.advance()
                     sampleCount++
-
-                    if (sampleCount % 50 == 0 && durationUs > 0) {
-                        val progress = (bufferInfo.presentationTimeUs.toFloat() / durationUs).coerceIn(0f, 1f)
-                        onProgress(progress)
+                    if (sampleCount % PROGRESS_INTERVAL_SAMPLES == 0 && durationUs > 0L) {
+                        onProgress((bufferInfo.presentationTimeUs.toFloat() / durationUs).coerceIn(0f, 1f))
                     }
                 }
             }
+            if (sampleCount == 0) throw IllegalStateException("لم يحتوي المسار الصوتي على عينات قابلة للاستخراج")
+            if (!securityManager.canPerformAction(SecurityAction.EXPORT) ||
+                !securityManager.canAccessMedia(videoItem.id)
+            ) {
+                throw SecurityException("تم إيقاف استخراج الصوت بسبب تغيير صلاحيات الوصول")
+            }
 
-            muxer.stop()
-            muxer.release()
+            activeMuxer.stop()
+            activeMuxer.release()
             muxer = null
-
-            extractor.release()
+            activeExtractor.release()
             extractor = null
-
             onProgress(1f)
 
-            // Insert new audio item into database
             val audioItem = MediaItem(
-                name = "${cleanName} (صوت مستخرج).m4a",
-                path = outputFile.absolutePath,
-                folder = outputFile.parentFile?.name ?: "Music",
+                name = "${cleanName}_Audio.m4a",
+                path = output.absolutePath,
+                folder = output.parentFile?.name ?: "Music",
                 mediaType = MediaType.AUDIO,
-                sizeBytes = outputFile.length(),
+                sizeBytes = output.length(),
                 dateModified = System.currentTimeMillis() / 1000,
                 durationMs = videoItem.durationMs,
                 isNew = true,
@@ -133,20 +149,45 @@ object AudioExtractor {
                 sourceMediaId = videoItem.id
             )
             repository.insertOrUpdate(audioItem)
+            savedToLibrary = true
 
-            ExtractionResult(
-                isSuccess = true,
-                outputPath = outputFile.absolutePath,
-                outputSizeBytes = outputFile.length()
-            )
-        } catch (e: Exception) {
+            ExtractionResult(true, output.absolutePath, output.length())
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
             ExtractionResult(
                 isSuccess = false,
-                errorMessage = e.localizedMessage ?: "حدث خطأ أثناء استخراج الصوت"
+                errorMessage = error.localizedMessage ?: "حدث خطأ أثناء استخراج الصوت"
             )
         } finally {
-            try { extractor?.release() } catch (ignored: Exception) {}
-            try { muxer?.release() } catch (ignored: Exception) {}
+            runCatching { extractor?.release() }
+            runCatching { muxer?.release() }
+            if (!savedToLibrary) outputFile?.delete()
         }
     }
+
+    private fun setExtractorDataSource(extractor: MediaExtractor, context: Context, path: String) {
+        val uri = Uri.parse(path)
+        when (uri.scheme?.lowercase()?.takeIf { it.length > 1 }) {
+            "content", "android.resource" -> extractor.setDataSource(context, uri, null)
+            "file" -> extractor.setDataSource(uri.path ?: throw FileNotFoundException("Invalid file URI"))
+            null -> {
+                val file = File(path)
+                if (!file.isFile) throw FileNotFoundException("ملف الفيديو غير موجود أو لا يمكن الوصول إليه")
+                extractor.setDataSource(file.absolutePath)
+            }
+            else -> throw IllegalArgumentException("Unsupported media URI scheme: ${uri.scheme}")
+        }
+    }
+
+    private fun safeFileName(value: String): String = value
+        .replace(Regex("[/\\\\?%*:|\"<>]"), "_")
+        .trim()
+        .trim('.')
+        .take(100)
+        .ifBlank { "audio" }
+
+    private const val DEFAULT_BUFFER_SIZE_BYTES = 512 * 1024
+    private const val MAX_BUFFER_SIZE_BYTES = 16 * 1024 * 1024
+    private const val PROGRESS_INTERVAL_SAMPLES = 50
+    private const val SECURITY_RECHECK_INTERVAL_SAMPLES = 500
 }

@@ -14,9 +14,9 @@ class SafePlayerApp : Application() {
     val sceneAnalyzer by lazy { com.example.scanner.SceneAnalyzer(this, repository) }
     val aiAnalyzer by lazy { com.example.ai.AiAnalyzer(this, repository) }
     val modelManager by lazy { com.example.modelmanager.ModelManager(this, database.aiModelDao()) }
-    val scanDataManager by lazy { com.example.scandata.ScanDataManager(this, repository) }
+    val scanDataManager by lazy { com.example.scandata.ScanDataManager(this, repository, securityManager) }
     val exportTaskDao by lazy { database.exportTaskDao() }
-    val exportEngine by lazy { com.example.export.ExportEngine(this, exportTaskDao, database.mediaDao()) }
+    val exportEngine by lazy { com.example.export.ExportEngine(this, exportTaskDao, database.mediaDao(), securityManager) }
     val taskRecordDao by lazy { database.taskRecordDao() }
     val resourceMonitor by lazy { com.example.tasks.resource.ResourceMonitor(this) }
     val taskManager by lazy { com.example.tasks.SafeTaskManager(this, taskRecordDao, resourceMonitor) }
@@ -26,7 +26,7 @@ class SafePlayerApp : Application() {
     val storageManager by lazy { com.example.storage.StorageManager(this, storageLocationDao, database.mediaDao(), securityManager) }
     val streamChannelDao by lazy { database.streamChannelDao() }
     val videoBookmarkDao by lazy { database.videoBookmarkDao() }
-    val wifiShareServer by lazy { com.example.streaming.WifiShareServer(this, repository) }
+    val wifiShareServer by lazy { com.example.streaming.WifiShareServer(this, repository, securityManager) }
     
     override fun onCreate() {
         super.onCreate()
