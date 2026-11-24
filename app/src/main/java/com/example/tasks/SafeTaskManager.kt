@@ -128,6 +128,14 @@ class SafeTaskManager(
         return id
     }
 
+    fun close() {
+        scope.cancel()
+    }
+
+    suspend fun closeAndJoin() {
+        scope.coroutineContext[Job]?.cancelAndJoin()
+    }
+
     fun triggerScheduler() {
         scope.launch {
             processQueue()

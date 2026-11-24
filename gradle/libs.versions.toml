@@ -21,6 +21,7 @@ runner = "1.6.2"
 coilCompose = "2.7.0"
 kotlinxCoroutinesAndroid = "1.10.2"
 kotlinxCoroutinesCore = "1.10.2"
+kotlinxCoroutinesPlayServices = "1.10.2"
 accompanistPermissions = "0.37.3"
 robolectric = "4.16.1"
 media3 = "1.5.1"
@@ -60,6 +61,7 @@ coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coi
 accompanist-permissions = { group = "com.google.accompanist", name = "accompanist-permissions", version.ref = "accompanistPermissions" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutinesAndroid" }
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinxCoroutinesCore" }
+kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "kotlinxCoroutinesPlayServices" }
 moshi-kotlin = { group = "com.squareup.moshi", name = "moshi-kotlin", version.ref = "moshiKotlin" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }

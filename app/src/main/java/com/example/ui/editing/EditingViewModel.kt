@@ -168,7 +168,7 @@ class EditingViewModel(
         if (undoStack.isNotEmpty()) {
             val proj = _project.value ?: return
             redoStack.add(_operations.value.map { it.copy() })
-            val previousState = undoStack.removeLast()
+            val previousState = undoStack.removeAt(undoStack.lastIndex)
             updateUndoRedoState()
             
             viewModelScope.launch {
@@ -183,7 +183,7 @@ class EditingViewModel(
         if (redoStack.isNotEmpty()) {
             val proj = _project.value ?: return
             undoStack.add(_operations.value.map { it.copy() })
-            val nextState = redoStack.removeLast()
+            val nextState = redoStack.removeAt(redoStack.lastIndex)
             updateUndoRedoState()
             
             viewModelScope.launch {

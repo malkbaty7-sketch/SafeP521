@@ -342,7 +342,7 @@ class WifiShareServer(
         val mimeType = item.mimeType?.takeIf { it.contains('/') && !it.contains('\r') && !it.contains('\n') }
             ?: uri?.let { runCatching { context.contentResolver.getType(it) }.getOrNull() }
             ?: "application/octet-stream"
-        if (uri?.scheme.equals("content", ignoreCase = true)) {
+        if (uri != null && uri.scheme.equals("content", ignoreCase = true)) {
             val stream = context.contentResolver.openInputStream(uri) ?: return null
             return MediaResource(stream, item.sizeBytes.coerceAtLeast(0L), mimeType, supportsRanges = false)
         }

@@ -7,6 +7,7 @@ import com.example.scanner.MediaScanner
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class SafePlayerApp : Application() {
     val database by lazy { AppDatabase.getDatabase(this) }
     val repository by lazy { MediaRepository(database.mediaDao()) }

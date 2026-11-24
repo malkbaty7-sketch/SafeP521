@@ -1,5 +1,3 @@
-@file:kotlin.OptIn(androidx.media3.common.util.UnstableApi::class)
-
 package com.example.ui.player
 
 import android.media.audiofx.BassBoost
@@ -11,6 +9,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class PlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null

@@ -90,6 +90,7 @@ dependencies {
   implementation(libs.moshi.kotlin)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
+  implementation(libs.kotlinx.coroutines.play.services)
   implementation(libs.media3.exoplayer)
   implementation(libs.media3.ui)
   implementation(libs.media3.session)
