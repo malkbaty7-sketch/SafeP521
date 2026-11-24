@@ -4,23 +4,22 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
-import com.example.tasks.data.TaskRecord
 import com.example.tasks.resource.ResourceMonitor
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import kotlinx.coroutines.delay
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [35])
 @OptIn(ExperimentalCoroutinesApi::class)
 class SafeTaskManagerTest {
 
@@ -39,12 +38,13 @@ class SafeTaskManagerTest {
     }
 
     @After
-    fun teardown() {
+    fun teardown() = runBlocking {
+        taskManager.closeAndJoin()
         database.close()
     }
 
     @Test
-    fun `test submit task creates queued state`() = runTest {
+    fun `enqueue task persists a task while the scheduler processes it`() = runTest {
         val id = taskManager.enqueueTask(
             taskType = "STORAGE_CLEANUP",
             priority = "HIGH",
@@ -53,6 +53,11 @@ class SafeTaskManagerTest {
         
         val task = database.taskRecordDao().getTaskById(id)
         assertNotNull(task)
-        assertEquals("QUEUED", task?.status)
+        assertEquals("STORAGE_CLEANUP", task?.taskType)
+        assertEquals("Cleanup Task", task?.title)
+        assertTrue(
+            "Unexpected task status: ${task?.status}",
+            task?.status in setOf<String?>("QUEUED", "RUNNING", "COMPLETED")
+        )
     }
 }

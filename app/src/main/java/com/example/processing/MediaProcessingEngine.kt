@@ -18,6 +18,7 @@ sealed class ExportState {
     data class Error(val exception: Exception) : ExportState()
 }
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class MediaProcessingEngine(private val context: Context) {
 
     fun executeTrim(
