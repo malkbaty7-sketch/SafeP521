@@ -43,7 +43,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-          problem-matcher: true
 
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses || true
