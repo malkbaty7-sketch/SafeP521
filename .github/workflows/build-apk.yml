@@ -22,6 +22,12 @@ on:
 permissions:
   contents: read
 
+# A push to a branch with an open PR triggers both events. Share one concurrency
+# group so PR validation supersedes a duplicate push run without the reverse.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}-${{ github.event_name == 'workflow_dispatch' && 'manual' || 'automatic' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     name: Verify and build APKs
@@ -46,15 +52,15 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '9.3.1'
-          cache-read-only: ${{ github.event_name == 'pull_request' }}
+          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
 
       - name: Run unit tests and lint
         shell: bash
         run: |
           set +e
           log_file="$RUNNER_TEMP/unit-tests-and-lint.log"
-          gradle :app:testDebugUnitTest :app:lintDebug --no-daemon --stacktrace 2>&1 | tee "$log_file"
-          gradle_status=${PIPESTATUS[0]}
+          GRADLE_LOG_FILE="$log_file" ./scripts/gradle-with-retries.sh :app:testDebugUnitTest :app:lintDebug --no-daemon --stacktrace
+          gradle_status=$?
           if [[ "$gradle_status" -ne 0 ]]; then
             python3 - <<'PY'
           import glob
@@ -138,7 +144,7 @@ jobs:
           exit "$gradle_status"
 
       - name: Build debug APK
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+        run: ./scripts/gradle-with-retries.sh :app:assembleDebug --no-daemon --stacktrace
 
       - name: Build signed release APK
         if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == 'true'
@@ -155,7 +161,7 @@ jobs:
             exit 1
           fi
           printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
-          gradle :app:assembleRelease --no-daemon --stacktrace
+          ./scripts/gradle-with-retries.sh :app:assembleRelease --no-daemon --stacktrace
 
       - name: Collect APKs
         run: |
